@@ -233,3 +233,81 @@ export async function setProduction(
 export function newIdempotencyKey(): string {
   return crypto.randomUUID()
 }
+
+// ---------------------------------------------------------------------------------------
+// Market
+// ---------------------------------------------------------------------------------------
+
+export interface PricePointDto {
+  atUtc: string
+  priceCent: number
+}
+
+export interface MarketQuoteDto {
+  resource: string
+  tier: string
+  sellPriceCent: number
+  buyPriceCent: number
+  basePriceCent: number
+  floorCent: number
+  ceilingCent: number
+  held: number
+  history: PricePointDto[]
+}
+
+export interface MarketBoardDto {
+  serverTimeUtc: string
+  orderLimit: number
+  feePercent: number
+  quotes: MarketQuoteDto[]
+}
+
+export interface SellResponse {
+  accepted: boolean
+  refusalCode: string | null
+  refusalMessage: string | null
+  resource: string
+  quantitySold: number
+  unitPriceCent: number
+  grossCent: number
+  feeCent: number
+  netCent: number
+  balanceCoins: number
+  resources: ResourceBalanceDto[]
+  xpGained: number
+  playerLevel: number
+  playerXp: number
+  xpToNextLevel: number
+  levelsGained: number
+  newSellPriceCent: number
+  serverTimeUtc: string
+}
+
+export function fetchMarket(signal?: AbortSignal): Promise<MarketBoardDto> {
+  return request<MarketBoardDto>('/api/market', { signal })
+}
+
+/**
+ * Sells goods to the NPC market.
+ *
+ * Sends what and how much — never a price. The server quotes, charges the fee and moves the
+ * market; the client only reports what came back (SECURITY_MODEL.md T2).
+ */
+export async function sell(
+  resource: string,
+  quantity: number,
+  idempotencyKey: string,
+): Promise<SellResponse> {
+  try {
+    return await request<SellResponse>('/api/market/sell', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ resource, quantity }),
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.refusal) {
+      return error.refusal as SellResponse
+    }
+    throw error
+  }
+}

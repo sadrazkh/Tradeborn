@@ -18,6 +18,8 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
     public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
     public DbSet<IdempotencyKeyEntity> IdempotencyKeys => Set<IdempotencyKeyEntity>();
     public DbSet<AuditLedgerEntity> AuditLedger => Set<AuditLedgerEntity>();
+    public DbSet<MarketPriceEntity> MarketPrices => Set<MarketPriceEntity>();
+    public DbSet<MarketPriceHistoryEntity> MarketPriceHistory => Set<MarketPriceHistoryEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -141,6 +143,21 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.Property(e => e.Metadata).HasColumnType("jsonb");
             entity.HasIndex(e => new { e.PlayerId, e.OccurredAtUtc });
             entity.HasIndex(e => e.OccurredAtUtc);
+        });
+
+        builder.Entity<MarketPriceEntity>(entity =>
+        {
+            entity.ToTable("market_prices");
+            entity.HasKey(e => e.ResourceId);
+            entity.Property(e => e.ResourceId).HasMaxLength(64);
+        });
+
+        builder.Entity<MarketPriceHistoryEntity>(entity =>
+        {
+            entity.ToTable("market_price_history");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ResourceId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.ResourceId, e.RecordedAtUtc });
         });
 
         builder.Entity<RecipeEntity>(entity =>

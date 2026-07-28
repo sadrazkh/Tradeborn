@@ -19,7 +19,11 @@ public sealed record CityDto(
     IReadOnlyList<BuildingDto> Buildings,
     IReadOnlyList<ResourceBalanceDto> Resources,
     IReadOnlyList<TransportDto> Transports,
+    PlayerProgressDto Progress,
     OfflineSummaryDto? OfflineSummary);
+
+/// <summary>The player's level and experience, so the HUD is correct from the first frame.</summary>
+public sealed record PlayerProgressDto(int Level, long Xp, long XpToNextLevel, int CityLevel);
 
 /// <summary>
 /// A load on the road.

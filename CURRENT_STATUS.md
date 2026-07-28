@@ -61,6 +61,47 @@ without a database has tested nothing, and hides the very problem it should surf
 | Tests | Unit, Architecture, Integration projects. |
 | CI | GitHub Actions: build, 3 test suites, client typecheck + build, bundle-size gate, gitleaks. |
 
+## Phase 6 — market & the complete loop (code complete)
+
+| Deliverable | State |
+|---|---|
+| NPC pricing: elasticity, mean reversion, floor/ceiling | ✅ |
+| 1.25× buy/sell spread, 3 % fee, per-order volume cap | ✅ |
+| Sell command — server-priced, idempotent, audited | ✅ |
+| Coins **and** XP, with level-ups | ✅ |
+| Price history + sparkline | ✅ |
+| Market panel with live quotes and a sale breakdown | ✅ |
+| Arbitrage impossibility | ✅ property test |
+| Unit tests | ✅ 95 passing (22 new) |
+| Integration tests | ✅ 11 new — **skipped, no database** |
+| `tools/economy-simulator` | ⬜ **not started** |
+| Scripted economic event | ⬜ **not started** |
+
+**The loop now closes:** build → produce → haul → deliver → **sell → coins + XP** → reinvest.
+
+**Prices need no ticking job.** The current price is a pure function of
+`(base, priceAtLastTrade, lastTradeAt, now)` — the same lazy-evaluation trick as production
+settlement. A market nobody is trading in costs nothing to run, and a player returning next
+day finds it healed rather than still punishing them.
+
+**Arbitrage is arithmetic, not a rate limit.** The NPC charges 1.25× what it pays, so a round
+trip loses 20 % before the 3 % fee. There is no waiting period or clever ordering that makes
+trading-without-producing profitable. A property test runs ten buy/sell rounds at four volumes
+and asserts the balance always ends lower.
+
+**Two locks, in a fixed order.** The market price row is global — two players selling wood
+contend on it — so the sell command takes the city lock *then* the market lock. Every handler
+that touches both uses that order; mixed lock ordering is how deadlocks get written.
+
+**Money stays in cent throughout.** Elasticity moves wood from 200 to 188 cent. A coins-only
+field would round that to "2" and the player would watch the sparkline drop while the number
+beside it never moved.
+
+**Not started:** the economy simulator (`ECONOMY_DESIGN.md` §12 invariants over 1/7/30-day
+horizons and three archetypes) and the scripted economic event. Both are listed for Phase 6
+and neither is built. The simulator matters most — it is what would prove no dominant strategy
+exists, and right now that claim rests on design reasoning rather than measurement.
+
 ## Phase 5 — visible logistics (backend complete, renderer not started)
 
 | Deliverable | State |

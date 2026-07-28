@@ -220,6 +220,29 @@ public sealed class AuditLedgerEntity
     public string Metadata { get; set; } = "{}";
 }
 
+/// <summary>
+/// The NPC market's price for one resource.
+/// </summary>
+/// <remarks>
+/// Holds only what cannot be derived. Base price and depth live in the seeded catalog, so
+/// retuning the economy is a seed change rather than a data migration across live prices.
+/// </remarks>
+public sealed class MarketPriceEntity
+{
+    public string ResourceId { get; set; } = string.Empty;
+    public long PriceAtLastTradeCent { get; set; }
+    public DateTimeOffset LastTradeAtUtc { get; set; }
+}
+
+/// <summary>A recorded price point, for the sparkline.</summary>
+public sealed class MarketPriceHistoryEntity
+{
+    public long Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public DateTimeOffset RecordedAtUtc { get; set; }
+    public long PriceCent { get; set; }
+}
+
 public sealed class RefreshTokenEntity
 {
     public Guid Id { get; set; }

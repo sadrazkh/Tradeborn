@@ -65,6 +65,13 @@ export interface TransportDto {
   arrivesAtUtc: string
 }
 
+export interface PlayerProgressDto {
+  level: number
+  xp: number
+  xpToNextLevel: number
+  cityLevel: number
+}
+
 export interface CityDto {
   name: string
   gridSize: number
@@ -75,6 +82,7 @@ export interface CityDto {
   buildings: BuildingDto[]
   resources: ResourceBalanceDto[]
   transports: TransportDto[]
+  progress: PlayerProgressDto
   offlineSummary?: OfflineSummaryDto | null
 }
 

@@ -3,11 +3,14 @@ import { markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { GameBridge } from '@/game/GameBridge'
 import {
   fetchCity,
+  fetchMarket,
   newIdempotencyKey,
+  sell,
   setProduction,
   startConstruction,
   startUpgrade,
   tryRefresh,
+  type MarketBoardDto,
 } from '@/api/client'
 import type {
   OfflineSummaryDto,
@@ -21,6 +24,7 @@ import SelectionCard from '@/ui/SelectionCard.vue'
 import BuildBar from '@/ui/BuildBar.vue'
 import ToastStack from '@/ui/ToastStack.vue'
 import OfflineRecap from '@/ui/OfflineRecap.vue'
+import MarketPanel from '@/ui/MarketPanel.vue'
 import type { BuildOption, Toast } from '@/ui/uiTypes'
 import AuthScreen from '@/ui/AuthScreen.vue'
 
@@ -49,6 +53,11 @@ const placing = ref(false)
 const commandBusy = ref(false)
 const toasts = ref<Toast[]>([])
 const offlineSummary = ref<OfflineSummaryDto | null>(null)
+const market = ref<MarketBoardDto | null>(null)
+const marketOpen = ref(false)
+const playerLevel = ref(1)
+const playerXp = ref(0)
+const xpToNextLevel = ref(100)
 let toastId = 0
 
 /**
@@ -93,6 +102,10 @@ async function startGame() {
     balanceCoins.value = city.balanceCoins
     resources.value = city.resources
     offlineSummary.value = city.offlineSummary ?? null
+    playerLevel.value = city.progress.level
+    playerXp.value = city.progress.xp
+    xpToNextLevel.value = city.progress.xpToNextLevel
+    cityLevel.value = city.progress.cityLevel
 
     if (!canvas.value) throw new Error('Canvas element was not mounted')
 
@@ -147,6 +160,68 @@ function onTimeOfDayChanged(value: number) {
 
 function reload() {
   window.location.reload()
+}
+
+/**
+ * Opens the market, refreshing prices first.
+ *
+ * Prices are global and move whenever anyone sells, so a board cached from five minutes ago
+ * would quote numbers the server will not honour.
+ */
+async function openMarket() {
+  marketOpen.value = true
+  await refreshMarket()
+}
+
+async function refreshMarket() {
+  try {
+    market.value = await fetchMarket(abort.signal)
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') return
+    console.error('[Tradeborn] Could not load the market', error)
+    toast('Could not load market prices.', 'warn')
+  }
+}
+
+/**
+ * Sells goods and reconciles against the server's answer.
+ *
+ * Everything shown afterwards — proceeds, balance, XP, the new price — comes from the
+ * response. The client never computes what the player earned.
+ */
+async function onSell(payload: { resource: string; quantity: number }) {
+  if (commandBusy.value) return
+  commandBusy.value = true
+
+  try {
+    const result = await sell(payload.resource, payload.quantity, newIdempotencyKey())
+
+    if (!result.accepted) {
+      toast(result.refusalMessage ?? 'That sale was refused.', 'warn')
+      return
+    }
+
+    balanceCoins.value = result.balanceCoins
+    resources.value = result.resources
+    playerLevel.value = result.playerLevel
+    playerXp.value = result.playerXp
+    xpToNextLevel.value = result.xpToNextLevel
+
+    const net = (result.netCent / 100).toFixed(2)
+    toast(`Sold ${result.quantitySold} ${result.resource} for ${net}c.`)
+
+    if (result.levelsGained > 0) {
+      toast(`Level ${result.playerLevel}!`)
+    }
+
+    // The sale moved the price, so the board the player is looking at is now stale.
+    await refreshMarket()
+  } catch (error) {
+    console.error('[Tradeborn] Sale failed', error)
+    toast('Could not reach the server. Nothing was sold.', 'warn')
+  } finally {
+    commandBusy.value = false
+  }
 }
 
 function woodHeld(): number {
@@ -305,6 +380,9 @@ async function confirmBuild(definitionId: string, col: number, row: number) {
       <span class="dot" aria-hidden="true"></span>
       {{ cityName }}
       <span class="coins">{{ balanceCoins.toLocaleString() }}<i>c</i></span>
+      <span class="level" :title="`${xpToNextLevel} XP to level ${playerLevel + 1}`">
+        Lv {{ playerLevel }}
+      </span>
     </div>
 
     <div v-if="resources.length" class="resources tb-panel">
@@ -330,6 +408,16 @@ async function confirmBuild(definitionId: string, col: number, row: number) {
       :busy="commandBusy"
       @pick="beginPlacement"
       @cancel="cancelPlacement"
+    />
+
+    <button v-if="!marketOpen" class="market-button tb-panel" @click="openMarket">Market</button>
+
+    <MarketPanel
+      :board="market"
+      :open="marketOpen"
+      :busy="commandBusy"
+      @close="marketOpen = false"
+      @sell="onSell"
     />
 
     <ToastStack :toasts="toasts" />
@@ -475,6 +563,31 @@ async function confirmBuild(definitionId: string, col: number, row: number) {
 /* Storage full is a design signal, not a failure — warn, never alarm. */
 .res.full b {
   color: var(--tb-warning);
+}
+
+.city-name .level {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(240, 180, 41, 0.18);
+  color: var(--tb-gold);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.market-button {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
+  padding: 9px 18px;
+  background: var(--tb-panel);
+  color: var(--tb-text);
+  border: 1px solid var(--tb-border);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  min-height: 40px;
 }
 
 .hint-bar {

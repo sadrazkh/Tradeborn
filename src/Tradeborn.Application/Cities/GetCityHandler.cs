@@ -2,6 +2,7 @@ using Tradeborn.Application.Abstractions;
 using Tradeborn.Application.Contracts;
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Domain.Production;
+using Tradeborn.Domain.Progression;
 
 namespace Tradeborn.Application.Cities;
 
@@ -22,6 +23,7 @@ namespace Tradeborn.Application.Cities;
 /// </remarks>
 public sealed class GetCityHandler(
     ICityStore cityStore,
+    IPlayerStore playerStore,
     TimeProvider timeProvider)
 {
     public async Task<CityDto?> HandleAsync(Guid playerId, CancellationToken cancellationToken = default)
@@ -42,14 +44,18 @@ public sealed class GetCityHandler(
             await cityStore.SaveAsync(aggregate, cancellationToken);
         }
 
-        return Map(aggregate, now, settledFrom, settlement);
+        var progress = await playerStore.LoadProgressAsync(playerId, cancellationToken)
+            ?? new PlayerProgress(1, 0);
+
+        return Map(aggregate, now, settledFrom, settlement, progress);
     }
 
     private static CityDto Map(
         CityAggregate aggregate,
         DateTimeOffset now,
         DateTimeOffset settledFrom,
-        SettlementResult settlement)
+        SettlementResult settlement,
+        PlayerProgress progress)
     {
         var city = aggregate.City;
         var capacity = city.Inventory.CapacityPerResource;
@@ -118,6 +124,7 @@ public sealed class GetCityHandler(
             buildings,
             resources,
             transports,
+            new PlayerProgressDto(progress.Level, progress.Xp, progress.XpToNextLevel, city.Level),
             summary);
     }
 }

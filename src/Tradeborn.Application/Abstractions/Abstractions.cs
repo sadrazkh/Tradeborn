@@ -1,5 +1,7 @@
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Domain.Cities;
+using Tradeborn.Domain.Market;
+using Tradeborn.Domain.Progression;
 using Tradeborn.Domain.Economy;
 
 namespace Tradeborn.Application.Abstractions;
@@ -88,6 +90,43 @@ public interface IIdempotencyStore
         string operation,
         string responseBody,
         CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// The NPC market's prices — global state shared by every player.
+/// </summary>
+/// <remarks>
+/// Unlike a city, this row is contended: two players selling wood at the same instant both
+/// move the same price. Commands therefore lock the price row, and always <b>after</b> the
+/// city row — a consistent lock order across every handler is what keeps two concurrent
+/// sellers from deadlocking each other.
+/// </remarks>
+public interface IMarketStore
+{
+    /// <summary>Every tradable resource's current price.</summary>
+    Task<IReadOnlyList<MarketPrice>> LoadAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Loads one price and holds a row lock on it for the rest of the transaction.</summary>
+    Task<MarketPrice?> LoadForUpdateAsync(ResourceId resource, CancellationToken cancellationToken = default);
+
+    Task SaveAsync(MarketPrice price, CancellationToken cancellationToken = default);
+
+    /// <summary>Appends a price point for the sparkline.</summary>
+    Task RecordHistoryAsync(MarketPrice price, DateTimeOffset atUtc, CancellationToken cancellationToken = default);
+
+    /// <summary>Recent price points per resource, oldest first.</summary>
+    Task<IReadOnlyDictionary<ResourceId, IReadOnlyList<PricePoint>>> LoadHistoryAsync(
+        int pointsPerResource, CancellationToken cancellationToken = default);
+}
+
+public sealed record PricePoint(DateTimeOffset AtUtc, long PriceCent);
+
+/// <summary>A player's level and experience, stored beside their account.</summary>
+public interface IPlayerStore
+{
+    Task<PlayerProgress?> LoadProgressAsync(Guid playerId, CancellationToken cancellationToken = default);
+
+    Task SaveProgressAsync(Guid playerId, PlayerProgress progress, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Append-only record of economic mutations (ADR-004).</summary>

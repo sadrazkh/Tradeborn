@@ -94,6 +94,7 @@ app.MapAuthEndpoints();
 app.MapCityEndpoints();
 app.MapConstructionEndpoints();
 app.MapProductionEndpoints();
+app.MapMarketEndpoints();
 
 app.MapFallbackToFile("index.html").AllowAnonymous();
 

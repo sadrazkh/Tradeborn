@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tradeborn",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/Tradeborn.Web/Tradeborn.Web.csproj", "-p:SkipSpaBuild=true", "--urls", "http://localhost:5084"],
+      "port": 5084
+    }
+  ]
+}

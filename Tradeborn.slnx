@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Tradeborn.Web/Tradeborn.Web.csproj" />
+  </Folder>
+</Solution>

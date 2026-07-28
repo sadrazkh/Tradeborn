@@ -1,0 +1,84 @@
+/*
+  Design tokens from docs/art-direction/ART_DIRECTION.md §3 and §7.
+  The HUD is floating, translucent, and minimal — the 3D scene is the interface.
+*/
+:root {
+  --tb-panel: rgba(22, 32, 46, 0.88);
+  --tb-panel-solid: #16202e;
+  --tb-border: rgba(240, 180, 41, 0.15);
+  --tb-text: #f2f5f8;
+  --tb-text-dim: #9fb0c4;
+  --tb-gold: #f0b429;
+  --tb-success: #4caf7d;
+  --tb-warning: #e8a33d;
+  --tb-danger: #d9534f;
+
+  --tb-radius: 16px;
+  --tb-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Rolling counters must not jitter. */
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #16202e;
+  color: var(--tb-text);
+}
+
+#renderCanvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+  touch-action: none;
+}
+
+.tb-panel {
+  background: var(--tb-panel);
+  border: 1px solid var(--tb-border);
+  border-radius: var(--tb-radius);
+  box-shadow: var(--tb-shadow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.tb-hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+}
+
+.tb-hud > * {
+  pointer-events: auto;
+}
+
+/* Respect the user's motion preference — ART_DIRECTION.md §9. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,8 +1,9 @@
 # ---- .NET ----
+# NOTE: do not use bare `[Dd]ebug/` here. It matches ANY directory named `debug`,
+# including source folders such as ClientApp/src/game/debug/, which silently drops real
+# source from the repository. bin/ and obj/ already cover MSBuild output.
 bin/
 obj/
-[Dd]ebug/
-[Rr]elease/
 *.user
 *.suo
 .vs/

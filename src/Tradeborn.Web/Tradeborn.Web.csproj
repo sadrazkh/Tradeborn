@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <SpaRoot>ClientApp\</SpaRoot>
+    <UserSecretsId>tradeborn-web-secrets</UserSecretsId>
+    <!-- The SPA build output lives here and is generated, never committed. -->
+    <SpaDist>$(MSBuildProjectDirectory)\wwwroot</SpaDist>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Keep node_modules and SPA sources out of the C# compile/watch set. -->
+    <Compile Remove="$(SpaRoot)**" />
+    <Content Remove="$(SpaRoot)**" />
+    <None Remove="$(SpaRoot)node_modules\**" />
+  </ItemGroup>
+
+  <!--
+    Build the Vue + Babylon SPA on publish and add its output explicitly to the publish set.
+
+    This is deliberately explicit rather than relying on StaticWebAssets discovery timing,
+    which can intermittently drop freshly built files. wwwroot is gitignored, so there are
+    never stale hashed bundles to copy.
+
+    Pass -p:SkipSpaBuild=true for backend-only builds (used by the test projects and by
+    `dotnet build` during API work).
+  -->
+  <Target Name="BuildSpa" AfterTargets="ComputeFilesToPublish" Condition="'$(SkipSpaBuild)' != 'true'">
+    <Message Importance="high" Text="Tradeborn: building SPA from $(SpaRoot)" />
+    <Exec WorkingDirectory="$(SpaRoot)" Command="npm ci" Condition="!Exists('$(SpaRoot)node_modules')" />
+    <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build" />
+    <ItemGroup>
+      <_SpaDistFiles Include="$(SpaDist)\**" />
+      <ResolvedFileToPublish Include="@(_SpaDistFiles)" Exclude="@(ResolvedFileToPublish)">
+        <RelativePath>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+</Project>

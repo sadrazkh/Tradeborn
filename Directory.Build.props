@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    Solution-wide defaults. Domain and Application additionally treat warnings as errors
+    (see docs/testing/TEST_STRATEGY.md §8); that is set per-project, not here, so that
+    generated code in Web/Infrastructure does not block the build.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

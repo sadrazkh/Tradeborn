@@ -1,0 +1,46 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{cs,csx}]
+indent_size = 4
+
+[*.{csproj,props,targets,xml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# ---------------------------------------------------------------------------
+# C# — quality rules that back docs/roadmap/CODE_QUALITY expectations.
+# Severities are deliberately `warning` (not `suggestion`) so CI surfaces them.
+# ---------------------------------------------------------------------------
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_prefer_braces = true:warning
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+dotnet_style_readonly_field = true:warning
+csharp_style_prefer_primary_constructors = true:suggestion
+
+# Nullability — the project compiles with <Nullable>enable</Nullable>.
+dotnet_diagnostic.CS8600.severity = error
+dotnet_diagnostic.CS8602.severity = error
+dotnet_diagnostic.CS8603.severity = error
+dotnet_diagnostic.CS8618.severity = error
+
+# Async correctness — silent sync-over-async and missing awaits are economy bugs.
+dotnet_diagnostic.CS4014.severity = error
+dotnet_diagnostic.CS1998.severity = warning
+
+# CancellationToken should be forwarded (see docs/roadmap/IMPLEMENTATION_PLAN.md).
+dotnet_diagnostic.CA2016.severity = warning
+
+# ConfigureAwait is not required in ASP.NET Core; keep it quiet.
+dotnet_diagnostic.CA2007.severity = none

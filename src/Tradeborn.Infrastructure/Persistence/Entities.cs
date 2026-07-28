@@ -22,6 +22,16 @@ public sealed class PlayerEntity
     public string DisplayName { get; set; } = string.Empty;
     public int Level { get; set; } = 1;
     public long Xp { get; set; }
+
+    /// <summary>
+    /// <c>Player</c>, <c>Support</c> (read-only) or <c>Admin</c>.
+    /// </summary>
+    /// <remarks>
+    /// Stored rather than inferred, and never settable through the API — elevation is a
+    /// database operation on purpose. An endpoint that can grant Admin is an endpoint that
+    /// can be tricked into granting Admin.
+    /// </remarks>
+    public string Role { get; set; } = "Player";
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public CityEntity? City { get; set; }
@@ -229,6 +239,16 @@ public sealed class AuditLedgerEntity
 
     public string? CorrelationId { get; set; }
     public string? IdempotencyKey { get; set; }
+
+    /// <summary>
+    /// Who performed the action, when that is not the owner of the city.
+    /// </summary>
+    /// <remarks>
+    /// Null for ordinary play, set for every admin action. Without this the ledger records
+    /// that a player's balance rose by 5 000 and nothing about the operator who did it — which
+    /// is precisely the question an audit exists to answer.
+    /// </remarks>
+    public Guid? ActorPlayerId { get; set; }
     public string Metadata { get; set; } = "{}";
 }
 
@@ -282,4 +302,20 @@ public sealed class RefreshTokenEntity
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? RevokedAtUtc { get; set; }
     public bool Used { get; set; }
+}
+
+/// <summary>
+/// A runtime switch.
+/// </summary>
+/// <remarks>
+/// Flags exist so a misbehaving system can be turned off without a deploy. They are read
+/// through a cached provider rather than per-request, because a flag lookup on the hot path
+/// would be a database round trip to answer a question whose answer changes once a month.
+/// </remarks>
+public sealed class FeatureFlagEntity
+{
+    public string Key { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public string? Description { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
 }

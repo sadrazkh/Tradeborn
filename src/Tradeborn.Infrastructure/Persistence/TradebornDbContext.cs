@@ -19,6 +19,7 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
     public DbSet<IdempotencyKeyEntity> IdempotencyKeys => Set<IdempotencyKeyEntity>();
     public DbSet<AuditLedgerEntity> AuditLedger => Set<AuditLedgerEntity>();
     public DbSet<PlayerQuestEntity> PlayerQuests => Set<PlayerQuestEntity>();
+    public DbSet<FeatureFlagEntity> FeatureFlags => Set<FeatureFlagEntity>();
     public DbSet<MarketPriceEntity> MarketPrices => Set<MarketPriceEntity>();
     public DbSet<MarketPriceHistoryEntity> MarketPriceHistory => Set<MarketPriceHistoryEntity>();
 
@@ -34,6 +35,7 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.HasIndex(e => e.Email).IsUnique();
             entity.Property(e => e.PasswordHash).HasMaxLength(256).IsRequired();
             entity.Property(e => e.DisplayName).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Role).HasMaxLength(32).IsRequired();
             entity.HasOne(e => e.City)
                   .WithOne(c => c.Player)
                   .HasForeignKey<CityEntity>(c => c.PlayerId)
@@ -144,6 +146,15 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.Property(e => e.Metadata).HasColumnType("jsonb");
             entity.HasIndex(e => new { e.PlayerId, e.OccurredAtUtc });
             entity.HasIndex(e => e.OccurredAtUtc);
+            entity.HasIndex(e => e.ActorPlayerId);
+        });
+
+        builder.Entity<FeatureFlagEntity>(entity =>
+        {
+            entity.ToTable("feature_flags");
+            entity.HasKey(e => e.Key);
+            entity.Property(e => e.Key).HasMaxLength(64);
+            entity.Property(e => e.Description).HasMaxLength(256);
         });
 
         builder.Entity<PlayerQuestEntity>(entity =>

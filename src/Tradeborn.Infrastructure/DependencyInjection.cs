@@ -8,6 +8,7 @@ using Tradeborn.Application.Cities;
 using Tradeborn.Application.Construction;
 using Tradeborn.Application.Market;
 using Tradeborn.Application.Production;
+using Tradeborn.Application.Admin;
 using Tradeborn.Application.Quests;
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Infrastructure.Identity;
@@ -54,6 +55,8 @@ public static class DependencyInjection
         services.AddScoped<MarketHandler>();
         services.AddScoped<IQuestStore, QuestStore>();
         services.AddScoped<QuestHandler>();
+        services.AddScoped<IAdminStore, AdminStore>();
+        services.AddScoped<AdminHandler>();
 
         var auth = configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new AuthOptions();
         if (string.IsNullOrWhiteSpace(auth.SigningKey) || auth.SigningKey.Length < 32)

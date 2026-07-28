@@ -151,6 +151,7 @@ public sealed class AuditLog(TradebornDbContext db, TimeProvider timeProvider) :
             ResourceDeltas = JsonSerializer.Serialize(entry.ResourceDeltas, Json),
             CorrelationId = entry.CorrelationId,
             IdempotencyKey = entry.IdempotencyKey,
+            ActorPlayerId = entry.ActorPlayerId,
             Metadata = JsonSerializer.Serialize(entry.Metadata ?? new Dictionary<string, string>(), Json),
         });
 

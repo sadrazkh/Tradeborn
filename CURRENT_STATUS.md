@@ -102,6 +102,46 @@ horizons and three archetypes) and the scripted economic event. Both are listed 
 and neither is built. The simulator matters most — it is what would prove no dominant strategy
 exists, and right now that claim rests on design reasoning rather than measurement.
 
+## Phase 8 — admin & operations (API complete, no panel UI)
+
+| Deliverable | State |
+|---|---|
+| Roles: Player / Support / Admin | ✅ stored, issued in the token |
+| Split policies: `admin.read` vs `admin.write` | ✅ |
+| Audit ledger records the **actor** | ✅ new column |
+| Player list, city inspection, audit viewer | ✅ paged, clamped at 100 |
+| **Economy tuning + catalog hot-reload** | ✅ the phase's acceptance criterion |
+| Feature flags | ✅ |
+| Grants and test-city reset, both audited | ✅ bounded, reason required |
+| System summary incl. money supply | ✅ |
+| Backup & deployment documentation | ✅ written, **never executed** |
+| Admin panel **UI** | ⬜ not built |
+| Job monitoring | ⬜ **not needed** — there is no job queue (ADR-003) |
+| Running the simulator from the panel | ⬜ simulator not built |
+
+**Economy retunable without a deploy.** Read the tuning document, edit it, PUT it back: rows
+are written and the in-memory catalog is reloaded. The reload is the whole point — without it
+the rows would change while every running request kept using the catalog loaded at startup, so
+the tool would appear to work and change nothing.
+
+Tuning deliberately **cannot** add resources or recipes. That changes the graph and its
+topological ranks, which is a seed change and a deploy, not a slider. Values that would break
+settlement — a cycle time of zero — are rejected rather than accepted.
+
+**Elevation is a SQL statement, not an endpoint.** An endpoint that can grant Admin is an
+endpoint that can be tricked into granting Admin.
+
+**Two policies, not one.** Most operator work is reading, and read access should not carry the
+ability to hand out money.
+
+**The actor column matters more than it looks.** Without it the ledger records that a balance
+rose by 5 000 and nothing about the operator who did it — precisely the question an audit
+exists to answer.
+
+⚠️ **`DEPLOYMENT.md` has never been executed.** Tradeborn has not been deployed anywhere. It is
+written now so the decisions are made before the first deploy rather than during it, and it
+says so at the top.
+
 ## Phase 7 — tutorial (quest chain complete)
 
 | Deliverable | State |

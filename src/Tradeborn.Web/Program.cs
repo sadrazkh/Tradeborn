@@ -51,7 +51,12 @@ builder.Services
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
-        .Build());
+        .Build())
+    // Two admin policies rather than one. Most of what an operator needs is reading — who is
+    // playing, why a balance looks wrong — and read access should not require the role that
+    // can also hand out money (SECURITY_MODEL.md §4).
+    .AddPolicy("admin.read", policy => policy.RequireRole("Admin", "Support"))
+    .AddPolicy("admin.write", policy => policy.RequireRole("Admin"));
 
 // Limits from docs/architecture/SECURITY_MODEL.md §5. Backed by Redis from Phase 3 so they
 // hold across instances; per-instance is correct for a single-instance deployment.
@@ -96,6 +101,7 @@ app.MapConstructionEndpoints();
 app.MapProductionEndpoints();
 app.MapMarketEndpoints();
 app.MapQuestEndpoints();
+app.MapAdminEndpoints();
 
 app.MapFallbackToFile("index.html").AllowAnonymous();
 

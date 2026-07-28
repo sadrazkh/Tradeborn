@@ -182,7 +182,7 @@ public sealed class AuthService(
             [
                 new Claim(JwtRegisteredClaimNames.Sub, player.Id.ToString()),
                 new Claim(JwtRegisteredClaimNames.Name, player.DisplayName),
-                new Claim(ClaimTypes.Role, "Player"),
+                new Claim(ClaimTypes.Role, player.Role),
             ]),
         };
 

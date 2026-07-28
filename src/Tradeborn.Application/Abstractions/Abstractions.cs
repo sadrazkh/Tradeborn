@@ -1,3 +1,4 @@
+using Tradeborn.Application.Contracts;
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Domain.Cities;
 using Tradeborn.Domain.Market;
@@ -167,7 +168,9 @@ public sealed record AuditEntry(
     IReadOnlyDictionary<string, long> ResourceDeltas,
     string? CorrelationId,
     string? IdempotencyKey,
-    IReadOnlyDictionary<string, string>? Metadata = null);
+    IReadOnlyDictionary<string, string>? Metadata = null,
+    /// <summary>Set only when an operator acted on someone else's city.</summary>
+    Guid? ActorPlayerId = null);
 
 /// <summary>
 /// Cache abstraction. Backed by Redis in production; an in-memory implementation is used when
@@ -187,4 +190,43 @@ public interface ICacheStore
 public interface IAdvisorService
 {
     Task<string?> ExplainAsync(Guid playerId, string question, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Read and tuning access for the admin panel.
+/// </summary>
+/// <remarks>
+/// Kept separate from the gameplay stores on purpose. Admin queries are wide, unbounded and
+/// cross-player — exactly the shape that must never leak into a request path a player can
+/// reach — so they live behind their own interface guarded by its own policy.
+/// </remarks>
+public interface IAdminStore
+{
+    Task<AdminPlayerPageDto> ListPlayersAsync(
+        int page, int pageSize, string? search, CancellationToken cancellationToken = default);
+
+    Task<AdminCityDto?> InspectCityAsync(Guid playerId, CancellationToken cancellationToken = default);
+
+    Task<AuditPageDto> ReadAuditAsync(
+        Guid? playerId, int page, int pageSize, CancellationToken cancellationToken = default);
+
+    Task<AdminSystemDto> ReadSystemAsync(CancellationToken cancellationToken = default);
+
+    Task<EconomyTuningDto> ReadTuningAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes tuning values and reloads the in-memory catalog.
+    /// </summary>
+    /// <remarks>
+    /// The reload is the point. Without it the rows would change while every running request
+    /// kept using the catalog loaded at startup — the panel would appear to work and change
+    /// nothing, which is the worst possible outcome for a tuning tool.
+    /// </remarks>
+    Task<ApplyTuningResponse> ApplyTuningAsync(
+        EconomyTuningDto tuning, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<FeatureFlagDto>> ListFlagsAsync(CancellationToken cancellationToken = default);
+
+    Task<FeatureFlagDto> SetFlagAsync(
+        string key, bool enabled, string? description, CancellationToken cancellationToken = default);
 }

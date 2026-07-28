@@ -55,6 +55,8 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
         var city = new City(entity.Id.ToString(), entity.LastSettledAtUtc);
         city.Credit(Money.FromCent(entity.BalanceCent));
 
+        city.RestoreCounters(entity.DeliveriesCompleted, entity.SalesCompleted);
+
         city.SetPlots(entity.Plots
             .OrderBy(p => p.Row).ThenBy(p => p.Col)
             .Select(p => new CityPlot(p.Col, p.Row, p.Terrain, p.Unlocked)));
@@ -120,6 +122,8 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
 
         entity.BalanceCent = aggregate.City.Balance.Cent;
         entity.LastSettledAtUtc = aggregate.City.LastSettledAt;
+        entity.DeliveriesCompleted = aggregate.City.DeliveriesCompleted;
+        entity.SalesCompleted = aggregate.City.SalesCompleted;
 
         SaveBuildings(entity, aggregate, cityId);
         SaveInventory(entity, aggregate, cityId);

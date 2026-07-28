@@ -2,8 +2,10 @@
 import { markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { GameBridge } from '@/game/GameBridge'
 import {
+  claimQuest,
   fetchCity,
   fetchMarket,
+  fetchQuests,
   newIdempotencyKey,
   sell,
   setProduction,
@@ -11,6 +13,7 @@ import {
   startUpgrade,
   tryRefresh,
   type MarketBoardDto,
+  type QuestBoardDto,
 } from '@/api/client'
 import type {
   OfflineSummaryDto,
@@ -25,6 +28,7 @@ import BuildBar from '@/ui/BuildBar.vue'
 import ToastStack from '@/ui/ToastStack.vue'
 import OfflineRecap from '@/ui/OfflineRecap.vue'
 import MarketPanel from '@/ui/MarketPanel.vue'
+import QuestTracker from '@/ui/QuestTracker.vue'
 import type { BuildOption, Toast } from '@/ui/uiTypes'
 import AuthScreen from '@/ui/AuthScreen.vue'
 
@@ -58,6 +62,7 @@ const marketOpen = ref(false)
 const playerLevel = ref(1)
 const playerXp = ref(0)
 const xpToNextLevel = ref(100)
+const quests = ref<QuestBoardDto | null>(null)
 let toastId = 0
 
 /**
@@ -102,6 +107,7 @@ async function startGame() {
     balanceCoins.value = city.balanceCoins
     resources.value = city.resources
     offlineSummary.value = city.offlineSummary ?? null
+    void refreshQuests()
     playerLevel.value = city.progress.level
     playerXp.value = city.progress.xp
     xpToNextLevel.value = city.progress.xpToNextLevel
@@ -224,6 +230,60 @@ async function onSell(payload: { resource: string; quantity: number }) {
   }
 }
 
+/**
+ * Re-reads the tutorial board.
+ *
+ * Called after anything that could finish a step. Completion is derived from city state on the
+ * server, so the client never decides a quest is done — it asks.
+ */
+async function refreshQuests() {
+  try {
+    quests.value = await fetchQuests(abort.signal)
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') return
+    // A failed quest refresh must not break play; the next action retries it.
+    console.warn('[Tradeborn] Could not refresh quests', error)
+  }
+}
+
+/**
+ * Collects a finished quest's reward.
+ *
+ * The level-up is celebrated separately from the reward: crossing a level is a bigger moment
+ * than the coins that caused it, and folding both into one line would bury it.
+ */
+async function onClaimQuest(questId: string) {
+  if (commandBusy.value) return
+  commandBusy.value = true
+
+  try {
+    const result = await claimQuest(questId, newIdempotencyKey())
+
+    if (!result.accepted) {
+      toast(result.refusalMessage ?? 'That reward could not be collected.', 'warn')
+      void refreshQuests()
+      return
+    }
+
+    balanceCoins.value = result.balanceCoins
+    playerLevel.value = result.playerLevel
+    playerXp.value = result.playerXp
+    xpToNextLevel.value = result.xpToNextLevel
+    quests.value = result.board
+
+    toast(`+${result.rewardCoins}c  ·  +${result.rewardXp} XP`)
+
+    if (result.levelsGained > 0) {
+      toast(`Level ${result.playerLevel}!`)
+    }
+  } catch (error) {
+    console.error('[Tradeborn] Claim failed', error)
+    toast('Could not reach the server.', 'warn')
+  } finally {
+    commandBusy.value = false
+  }
+}
+
 function woodHeld(): number {
   return resources.value.find((r) => r.resource === 'wood')?.quantity ?? 0
 }
@@ -271,6 +331,7 @@ async function onSetProduction(payload: { buildingId: string; active: boolean })
     if (result.building) {
       bridge.value?.updateBuilding(result.building)
       toast(payload.active ? 'Production started.' : 'Production paused.')
+      void refreshQuests()
     }
   } catch (error) {
     console.error('[Tradeborn] Production toggle failed', error)
@@ -297,6 +358,7 @@ async function onUpgrade(buildingId: string) {
     if (result.building) {
       bridge.value?.updateBuilding(result.building)
       toast('Upgrade started.')
+      void refreshQuests()
     }
   } catch (error) {
     console.error('[Tradeborn] Upgrade failed', error)
@@ -331,6 +393,7 @@ async function confirmBuild(definitionId: string, col: number, row: number) {
     if (result.building) {
       bridge.value?.addBuilding(result.building)
       toast('Construction started.')
+      void refreshQuests()
     }
   } catch (error) {
     console.error('[Tradeborn] Build failed', error)
@@ -419,6 +482,8 @@ async function confirmBuild(definitionId: string, col: number, row: number) {
       @close="marketOpen = false"
       @sell="onSell"
     />
+
+    <QuestTracker :board="quests" :busy="commandBusy" @claim="onClaimQuest" />
 
     <ToastStack :toasts="toasts" />
 

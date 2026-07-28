@@ -169,6 +169,7 @@ public static class SettlementEngine
                 city.Inventory.Add(job.Resource, accepted);
                 deliveredTotals[job.Resource] = deliveredTotals.GetValueOrDefault(job.Resource) + accepted;
                 job.Deliver(accepted);
+                city.RecordDelivery();
                 any = true;
             }
 

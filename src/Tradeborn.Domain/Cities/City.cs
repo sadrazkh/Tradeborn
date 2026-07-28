@@ -79,6 +79,30 @@ public sealed class City
     /// <summary>Loads currently on the road.</summary>
     public IReadOnlyList<TransportJob> Transports => transports;
 
+    /// <summary>
+    /// How many cart-loads have ever been delivered, and how many sales made.
+    /// </summary>
+    /// <remarks>
+    /// Two tutorial quests ask "has a delivery happened?" and "has a sale happened?". Both are
+    /// one-way facts about the past that cannot be derived from current state — a player who
+    /// sells everything they were delivered looks, by inventory alone, exactly like a player
+    /// who never received anything. Counters are the honest way to answer.
+    /// </remarks>
+    public long DeliveriesCompleted { get; private set; }
+
+    public long SalesCompleted { get; private set; }
+
+    internal void RecordDelivery() => DeliveriesCompleted++;
+
+    public void RecordSale() => SalesCompleted++;
+
+    /// <summary>Restores lifetime counters loaded from the database.</summary>
+    public void RestoreCounters(long deliveries, long sales)
+    {
+        DeliveriesCompleted = deliveries;
+        SalesCompleted = sales;
+    }
+
     public bool HasTransportFrom(string buildingId) =>
         transports.Any(t => string.Equals(t.FromBuildingId, buildingId, StringComparison.Ordinal));
 

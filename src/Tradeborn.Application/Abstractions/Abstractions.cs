@@ -121,6 +121,29 @@ public interface IMarketStore
 
 public sealed record PricePoint(DateTimeOffset AtUtc, long PriceCent);
 
+/// <summary>
+/// Which tutorial rewards a player has already collected.
+/// </summary>
+/// <remarks>
+/// The only quest state that is stored. Completion is derived from the city every time it is
+/// asked; what must be durable is the fact a reward was <i>paid</i>, because that is real money.
+/// </remarks>
+public interface IQuestStore
+{
+    Task<IReadOnlySet<string>> LoadClaimedAsync(Guid playerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a claim.
+    /// </summary>
+    /// <returns>
+    /// False if this player had already claimed it — the primary key collided, which is the
+    /// mechanism rather than an error (SECURITY_MODEL.md T5).
+    /// </returns>
+    Task<bool> TryRecordClaimAsync(
+        Guid playerId, string questId, DateTimeOffset atUtc, CancellationToken cancellationToken = default);
+}
+
+
 /// <summary>A player's level and experience, stored beside their account.</summary>
 public interface IPlayerStore
 {

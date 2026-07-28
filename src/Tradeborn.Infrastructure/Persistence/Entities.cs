@@ -36,6 +36,18 @@ public sealed class CityEntity
     public long BalanceCent { get; set; }
     public DateTimeOffset LastSettledAtUtc { get; set; }
 
+    /// <summary>
+    /// Lifetime counters.
+    /// </summary>
+    /// <remarks>
+    /// Two tutorial quests ask about the past — "has a delivery happened?", "has a sale
+    /// happened?" — and current state cannot answer either. A player who sells everything
+    /// they were delivered looks, by inventory alone, exactly like one who received nothing.
+    /// </remarks>
+    public long DeliveriesCompleted { get; set; }
+
+    public long SalesCompleted { get; set; }
+
     /// <summary>PostgreSQL system column, mapped as an EF concurrency token (SECURITY_MODEL.md T4).</summary>
     public uint Version { get; set; }
 
@@ -227,6 +239,18 @@ public sealed class AuditLedgerEntity
 /// Holds only what cannot be derived. Base price and depth live in the seeded catalog, so
 /// retuning the economy is a seed change rather than a data migration across live prices.
 /// </remarks>
+/// <summary>A collected tutorial reward.</summary>
+/// <remarks>
+/// The composite primary key is the anti-double-claim mechanism: a second insert for the same
+/// (player, quest) collides instead of paying twice (SECURITY_MODEL.md T5).
+/// </remarks>
+public sealed class PlayerQuestEntity
+{
+    public Guid PlayerId { get; set; }
+    public string QuestId { get; set; } = string.Empty;
+    public DateTimeOffset ClaimedAtUtc { get; set; }
+}
+
 public sealed class MarketPriceEntity
 {
     public string ResourceId { get; set; } = string.Empty;

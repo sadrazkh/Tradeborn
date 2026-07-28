@@ -195,6 +195,7 @@ public sealed class MarketHandler(
 
         city.Inventory.Remove(price.Resource, quantity);
         city.Credit(quote.Net);
+        city.RecordSale();
 
         // The sale moves the price only after it has been executed, so the seller gets the
         // price they were quoted and the *next* seller inherits the impact.

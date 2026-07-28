@@ -18,6 +18,7 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
     public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
     public DbSet<IdempotencyKeyEntity> IdempotencyKeys => Set<IdempotencyKeyEntity>();
     public DbSet<AuditLedgerEntity> AuditLedger => Set<AuditLedgerEntity>();
+    public DbSet<PlayerQuestEntity> PlayerQuests => Set<PlayerQuestEntity>();
     public DbSet<MarketPriceEntity> MarketPrices => Set<MarketPriceEntity>();
     public DbSet<MarketPriceHistoryEntity> MarketPriceHistory => Set<MarketPriceHistoryEntity>();
 
@@ -143,6 +144,13 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.Property(e => e.Metadata).HasColumnType("jsonb");
             entity.HasIndex(e => new { e.PlayerId, e.OccurredAtUtc });
             entity.HasIndex(e => e.OccurredAtUtc);
+        });
+
+        builder.Entity<PlayerQuestEntity>(entity =>
+        {
+            entity.ToTable("player_quests");
+            entity.HasKey(e => new { e.PlayerId, e.QuestId });
+            entity.Property(e => e.QuestId).HasMaxLength(64);
         });
 
         builder.Entity<MarketPriceEntity>(entity =>

@@ -311,3 +311,72 @@ export async function sell(
     throw error
   }
 }
+
+// ---------------------------------------------------------------------------------------
+// Quests
+// ---------------------------------------------------------------------------------------
+
+export interface QuestDto {
+  id: string
+  order: number
+  title: string
+  hint: string
+  rewardCoins: number
+  rewardXp: number
+  isComplete: boolean
+  isClaimed: boolean
+  isClaimable: boolean
+}
+
+/**
+ * The tutorial chain.
+ *
+ * `current` is the only quest the HUD shows. Rendering all seven would turn a contextual
+ * tutorial into a checklist, which is the wall of text PLAYER_JOURNEY.md forbids. Null once
+ * the chain is done and guidance should stop.
+ */
+export interface QuestBoardDto {
+  current: QuestDto | null
+  all: QuestDto[]
+  claimed: number
+  total: number
+}
+
+export interface ClaimQuestResponse {
+  accepted: boolean
+  refusalCode: string | null
+  refusalMessage: string | null
+  questId: string
+  rewardCoins: number
+  rewardXp: number
+  balanceCoins: number
+  playerLevel: number
+  playerXp: number
+  xpToNextLevel: number
+  levelsGained: number
+  board: QuestBoardDto | null
+  serverTimeUtc: string
+}
+
+export function fetchQuests(signal?: AbortSignal): Promise<QuestBoardDto> {
+  return request<QuestBoardDto>('/api/quests', { signal })
+}
+
+/** Collects a finished quest's reward. Idempotent: a retry replays rather than paying twice. */
+export async function claimQuest(
+  questId: string,
+  idempotencyKey: string,
+): Promise<ClaimQuestResponse> {
+  const path = `/api/quests/${encodeURIComponent(questId)}/claim`
+  try {
+    return await request<ClaimQuestResponse>(path, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.refusal) {
+      return error.refusal as ClaimQuestResponse
+    }
+    throw error
+  }
+}

@@ -102,6 +102,40 @@ horizons and three archetypes) and the scripted economic event. Both are listed 
 and neither is built. The simulator matters most — it is what would prove no dominant strategy
 exists, and right now that claim rests on design reasoning rather than measurement.
 
+## Phase 7 — tutorial (quest chain complete)
+
+| Deliverable | State |
+|---|---|
+| Seven-quest tutorial chain | ✅ domain, rules, completion conditions |
+| Rewards granted exactly once | ✅ primary-key collision, not a check (T5) |
+| Delivery / sale lifetime counters | ✅ two quests ask about the past |
+| Claim command, persistence, migration, endpoints | ✅ `QuestsAndCounters` |
+| Quest tracker UI, one step at a time | ✅ |
+| Level-up feedback | ✅ celebrated separately from the reward |
+| Sound hooks, VFX | ⬜ not started |
+| Playwright E2E over the 6-minute script | ⬜ not started |
+| Unit tests | ✅ 117 passing (22 new) |
+
+**Completion is derived, claiming is stored.** A quest's "done?" is recomputed from city state
+every time it is asked — nothing to keep in sync, nothing to migrate when a condition changes,
+and a player who builds a Sawmill before being asked simply finds that step already complete.
+The only durable state is *which rewards were paid*, because that is real money.
+
+**Claiming is deliberate, not automatic.** A design choice rather than a technical one: the
+moment of taking the reward is where the payoff lands, and a reward that appears silently while
+the player is looking elsewhere is a reward they never felt. It also makes double-payment
+impossible to express — the claim is an insert guarded by a primary key.
+
+**Two counters were unavoidable.** "Has a delivery happened?" and "has a sale happened?" are
+facts about the past that current state cannot answer: a player who sold everything they were
+delivered looks, by inventory alone, exactly like one who never received anything. A test
+asserts that selling your whole stock does not un-complete the delivery quest.
+
+**Guarded by tests that encode design rules**, not just behaviour: every hint is asserted to be
+twelve words or fewer, the chain is asserted to total 1 200 coins and 330 XP, and finishing it
+is asserted to land the player at level 3. If a reward is retuned and pacing shifts, a test
+says so.
+
 ## Phase 5 — visible logistics (backend complete, renderer not started)
 
 | Deliverable | State |

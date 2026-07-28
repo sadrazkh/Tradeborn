@@ -1,0 +1,18 @@
+<Project>
+
+  <!-- Inherit the solution-wide settings, then relax what only applies to product code. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      CA1707 (no underscores in member names) is a public-API convention. Test names are
+      sentences, not API: `Settling_in_one_jump_equals_settling_in_many_steps` is the point.
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+</Project>

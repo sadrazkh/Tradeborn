@@ -145,13 +145,21 @@ prices are still depressed after a 2 h absence (too slow).
 **Basis:** All rates are integers per cycle; multipliers are applied at definition time and
 floored once. Money is cent-precision `long`.
 
-**Risk:** `1.6^2 = 2.56` → a base rate of 1/cycle floors to 2, a 25 % silent loss at L3.
+**Risk:** `1.6^2 = 2.56` → a base rate of 1 unit/cycle floors to 2, a 25 % silent loss at L3.
 
-**Mitigation (implemented in Phase 4):** rates are stored as **units per 1000 cycles**
-internally, so upgrade multipliers apply with three digits of headroom before flooring.
+**Mitigation (implemented, Phase 1):** upgrades scale the **cycle time down** rather than
+scaling the output quantity up. Both express the same rate, but shortening the cycle has no
+quantity to round: `30 000 ms / 1.6 = 18 750 ms` → exactly 192 units/hour at level 2, and
+`/2.56 = 11 718 ms` → 307/hour at level 3, matching `ECONOMY_DESIGN.md` §5 exactly.
 
-**Falsified if:** a unit test finds > 2 % deviation between ideal and floored output at any
-level ≤ 3.
+> This supersedes the originally planned "units per 1000 cycles" mitigation, which would
+> have reduced the rounding error but not eliminated it. Scaling time removes it entirely.
+
+**Falsified if:** a unit test finds any deviation between the published and computed rate at
+any level ≤ 3.
+
+**Guarded by:** `SettlementTests.Upgrades_produce_the_documented_rates_without_rounding_loss`,
+which asserts 120 / 192 / 307 units per hour at levels 1–3. ✅ passing.
 
 ---
 

@@ -21,19 +21,22 @@ continuously rather than *derived* on demand.
 ## Decision
 
 State advances only when read, when a command arrives, or when a scheduled discrete event
-fires. Settlement divides the elapsed span into **bounded sub-steps** (max 200) and resolves
-buildings in **topological order** of the recipe graph, limiting each building by
-`min(time, available input, free capacity)`.
+fires. Settlement walks a **fixed 30 s grid aligned to the Unix epoch**, resolves buildings
+in **topological order** of the recipe graph, limits each building by
+`min(time, available input, free capacity)`, and **commits outputs at the end of each step**.
+It exits early once the state reaches a fixed point.
 
 ## Rationale
 
 - **Offline players cost zero CPU.** Nothing runs until someone looks.
 - **Correct under scarcity.** The three-way limit is what naive elapsed-time maths misses.
-- **Deterministic.** State is a pure function of `(lastSettledState, now)`, which makes the
-  economy testable, auditable, and reproducible.
-- **Cheap.** 200 steps × ~10 buildings ≈ 2 000 in-memory operations, no I/O, sub-millisecond.
-- **Bounded error.** Sub-stepping caps the "goods used slightly early" artefact at one step,
-  always in the player's favour, never destroying goods.
+- **Exactly deterministic.** Because the grid is absolute rather than derived from the
+  elapsed span, settling once over eight hours walks the same cells as settling 480 times
+  over one minute. A relative step size would have made these diverge silently.
+- **No value from nothing.** Committing outputs at step end stops a consumer using goods its
+  producer has not yet made.
+- **Cheap.** The fixed-point exit means a returning player costs only the steps needed to
+  fill their warehouse — a 30-day absence settles in under 500 steps, sub-millisecond.
 
 ## Consequences
 
@@ -41,10 +44,10 @@ buildings in **topological order** of the recipe graph, limiting each building b
 `FakeTimeProvider`; jobs become an optimisation rather than a correctness requirement, so
 the worker is freely restartable and horizontally scalable.
 
-**Negative — known approximation:** within a single step a consumer may use output produced
-by an upstream building in that same step. Bounded, player-favourable, and removing it costs
-~100× the CPU for an effect no player can perceive. Accepted deliberately and recorded here
-so it is never discovered as a surprise.
+**Negative — chains take one cycle to spin up.** A cold Lumber Camp → Sawmill chain yields
+59 planks in its first hour instead of 60, reaching full rate from hour two. This is the
+price of end-of-step commit, it is realistic pipeline-fill behaviour, and it errs toward
+correctness rather than generosity. Asserted by a test so it stays a known property.
 
 **Negative:** settlement must run before *every* read and command. Mitigated by it being
 cheap and by having exactly one entry point (`Cities` module) that nothing may bypass.

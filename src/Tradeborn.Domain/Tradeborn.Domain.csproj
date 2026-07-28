@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      The Domain is the one project where warnings are errors without exception.
+      It holds the economy rules; a nullability or async warning here is a money bug
+      waiting to happen. See docs/testing/TEST_STRATEGY.md §8.
+    -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!--
+    Tradeborn.Domain must have ZERO external dependencies (ADR-002).
+    Asserted by Tradeborn.ArchitectureTests. Do not add a PackageReference here.
+  -->
+
+</Project>

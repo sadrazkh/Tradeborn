@@ -1,5 +1,9 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Tradeborn.Domain/Tradeborn.Domain.csproj" />
     <Project Path="src/Tradeborn.Web/Tradeborn.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tradeborn.UnitTests/Tradeborn.UnitTests.csproj" />
   </Folder>
 </Solution>

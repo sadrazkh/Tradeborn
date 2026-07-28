@@ -56,30 +56,48 @@ cyclesRun        = min(cyclesByTime, cyclesByInput, cyclesByCapacity)
 Whichever limit binds is recorded as the building's `HaltReason` — which the client renders
 as a warning mote above the building (pillar P1: the player *sees* the bottleneck).
 
-## 4. Bounded sub-stepping
+## 4. Fixed-grid sub-stepping
 
 Resolving all buildings once over the whole elapsed span would let a sawmill consume wood
-"before" the lumber camp produced it. Instead, the span is divided into steps:
+"before" the lumber camp produced it. Instead the span is divided into sub-steps, and three
+properties make the result exact.
 
-```
-stepSeconds = max(minCycleSeconds, ceil(elapsedSeconds / MaxSteps))    MaxSteps = 200
-```
+### 4.1 The grid is absolute, not relative
+Sub-step boundaries fall on multiples of **30 000 ms since the Unix epoch** — the shortest
+recipe cycle in the slice. The step size does **not** depend on how much time has elapsed.
 
-For each step, buildings are resolved in **topological order** of the recipe graph
-(extractors → processors → assemblers). Producers therefore always run before consumers
-within a step, and goods cannot flow backwards in time by more than one step.
+This is what makes the determinism invariant hold *exactly*. Settling once across eight
+hours walks precisely the same grid cells as settling 480 times across one minute each, so
+the two produce identical state. A step size derived from the elapsed span (e.g.
+`elapsed / 200`) would produce different cell boundaries in the two cases and the results
+would silently diverge — which is the trap this design exists to avoid.
 
-**Cost:** 200 steps × ~10 buildings = ~2 000 in-memory operations, no I/O. Sub-millisecond.
+### 4.2 Buildings resolve in topological order
+Within each step, buildings are resolved by recipe rank (extractors → processors →
+assemblers), so producers always run before their consumers.
 
-**Accuracy:** for an absence of 8 h, `stepSeconds = 144 s` — comparable to the longest
-recipe cycle (120 s). Error is bounded by one step and always in the player's favour
-(never destroys goods). For absences under ~1.7 h, steps are exactly 30 s and settlement is
-exact.
+### 4.3 Outputs are committed at the end of the step
+Inputs are consumed immediately (so two buildings competing for the same input in one step
+cannot both spend it), but outputs accumulate in a buffer and are added to the inventory
+only once every building has been resolved.
 
-> **Known approximation.** Within a single step, a consumer may use output produced by an
-> upstream building in that same step. Accepted deliberately: it is bounded, it favours the
-> player, and removing it costs 100× the CPU for an effect no player can perceive. Recorded
-> as a limitation in [ADR-003](../adr/ADR-003-time-model.md).
+Without this, a consumer could use — in the very same step — goods its upstream producer
+had not yet made. That is a small but real way for the economy to create value from nothing.
+
+> **Consequence: chains take one cycle to spin up.** A cold Lumber Camp → Sawmill chain
+> yields 59 planks in its first hour rather than 60, reaching the full 60/hour from the
+> second hour onward. This is realistic pipeline-fill latency, it favours correctness over
+> generosity, and it is asserted by a test (`Chains_take_one_cycle_to_spin_up`) so it stays
+> a known property rather than resurfacing later as a bug report.
+
+### 4.4 Cost: the fixed-point exit
+A 30-day absence is 86 400 grid cells, which would be wasteful to walk. It is not walked:
+once a full step produces nothing **and** every producing building is halted, the state is a
+fixed point — inventory changes only through production, so no later step can differ.
+Settlement stops there.
+
+In practice a returning player costs only the steps needed to fill their warehouse. Measured:
+a 30-day absence with a 200-unit cap settles in **under 500 steps**, sub-millisecond.
 
 ## 5. Settlement algorithm
 

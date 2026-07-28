@@ -50,6 +50,21 @@ export interface OfflineSummaryDto {
   haltedBuildings: string[]
 }
 
+/**
+ * A load on the road.
+ *
+ * Absolute server instants rather than a progress fraction, so a client loading mid-journey
+ * places the cart where it actually is instead of restarting the trip.
+ */
+export interface TransportDto {
+  id: string
+  fromBuildingId: string
+  resource: string
+  quantity: number
+  departedAtUtc: string
+  arrivesAtUtc: string
+}
+
 export interface CityDto {
   name: string
   gridSize: number
@@ -59,6 +74,7 @@ export interface CityDto {
   plots: PlotDto[]
   buildings: BuildingDto[]
   resources: ResourceBalanceDto[]
+  transports: TransportDto[]
   offlineSummary?: OfflineSummaryDto | null
 }
 

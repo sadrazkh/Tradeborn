@@ -1,9 +1,11 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Tradeborn.Application.Abstractions;
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Domain.Cities;
 using Tradeborn.Domain.Common;
 using Tradeborn.Domain.Economy;
+using Tradeborn.Domain.Logistics;
 
 namespace Tradeborn.Infrastructure.Persistence;
 
@@ -12,6 +14,8 @@ namespace Tradeborn.Infrastructure.Persistence;
 /// </summary>
 public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICityStore
 {
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
     public Task<CityAggregate?> LoadAsync(Guid playerId, CancellationToken cancellationToken = default) =>
         LoadCoreAsync(playerId, cancellationToken);
 
@@ -40,6 +44,7 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
             .Include(c => c.Buildings)
             .Include(c => c.Inventory)
             .Include(c => c.Plots)
+            .Include(c => c.Transports)
             .FirstOrDefaultAsync(c => c.PlayerId == playerId, cancellationToken);
 
         if (entity is null)
@@ -64,7 +69,7 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
                 continue;
             }
 
-            city.Add(BuildingInstance.Rehydrate(
+            var instance = BuildingInstance.Rehydrate(
                 building.Id.ToString(),
                 definition,
                 building.Col,
@@ -74,7 +79,10 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
                 Enum.Parse<HaltReason>(building.HaltReason),
                 building.ProgressMilliseconds,
                 building.CompletesAtUtc,
-                building.PendingLevel == 0 ? building.Level : building.PendingLevel));
+                building.PendingLevel == 0 ? building.Level : building.PendingLevel);
+
+            instance.RestoreOutputBuffer(DeserialiseBuffer(building.OutputBuffer));
+            city.Add(instance);
         }
 
         // Capacity is derived from the buildings just added, so inventory must be restored
@@ -86,6 +94,16 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
             city.Inventory.Set(ResourceId.From(item.ResourceId), item.Quantity);
         }
 
+        // Carts already on the road. Restoring these is what makes a haul survive a page
+        // refresh, a lost connection, or a closed tab (GDD 3.5).
+        city.RestoreTransports(entity.Transports.Select(t => new TransportJob(
+            t.Id.ToString(),
+            t.FromBuildingId.ToString(),
+            ResourceId.From(t.ResourceId),
+            t.Quantity,
+            t.DepartedAtUtc,
+            t.ArrivesAtUtc)));
+
         return new CityAggregate(entity.Id, city, entity.Name, entity.GridSize);
     }
 
@@ -96,6 +114,7 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
         var entity = await db.Cities
             .Include(c => c.Buildings)
             .Include(c => c.Inventory)
+            .Include(c => c.Transports)
             .FirstOrDefaultAsync(c => c.Id == cityId, cancellationToken)
             ?? throw new InvalidOperationException($"City '{cityId}' no longer exists.");
 
@@ -104,6 +123,7 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
 
         SaveBuildings(entity, aggregate, cityId);
         SaveInventory(entity, aggregate, cityId);
+        SaveTransports(entity, aggregate, cityId);
 
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -122,6 +142,7 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
                 row.ProgressMilliseconds = building.ProgressMilliseconds;
                 row.CompletesAtUtc = building.CompletesAtUtc;
                 row.PendingLevel = building.PendingLevel;
+                row.OutputBuffer = SerialiseBuffer(building);
                 continue;
             }
 
@@ -141,8 +162,82 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
                 ProgressMilliseconds = building.ProgressMilliseconds,
                 CompletesAtUtc = building.CompletesAtUtc,
                 PendingLevel = building.PendingLevel,
+                OutputBuffer = SerialiseBuffer(building),
             });
         }
+    }
+
+    /// <summary>
+    /// Reconciles in-flight carts.
+    /// </summary>
+    /// <remarks>
+    /// Jobs are created and retired entirely by settlement, so this mirrors the domain rather
+    /// than merging: anything the domain dropped has been delivered and must be removed, or
+    /// the same load would be delivered again on the next read.
+    /// </remarks>
+    private static void SaveTransports(CityEntity entity, CityAggregate aggregate, Guid cityId)
+    {
+        var live = aggregate.City.Transports.ToDictionary(t => t.Id, StringComparer.Ordinal);
+
+        foreach (var row in entity.Transports.ToArray())
+        {
+            if (live.TryGetValue(row.Id.ToString(), out var job))
+            {
+                row.Quantity = job.Quantity;
+                live.Remove(row.Id.ToString());
+            }
+            else
+            {
+                entity.Transports.Remove(row);
+            }
+        }
+
+        foreach (var job in live.Values)
+        {
+            entity.Transports.Add(new TransportJobEntity
+            {
+                // Domain ids are deterministic strings, so a stable hash keeps the same job
+                // mapping to the same row across settlements.
+                Id = DeterministicGuid(job.Id),
+                CityId = cityId,
+                FromBuildingId = Guid.Parse(job.FromBuildingId),
+                ResourceId = job.Resource.Value,
+                Quantity = job.Quantity,
+                DepartedAtUtc = job.DepartedAtUtc,
+                ArrivesAtUtc = job.ArrivesAtUtc,
+            });
+        }
+    }
+
+    /// <summary>
+    /// A stable Guid derived from a domain id, so a job keeps the same row across settlements.
+    /// </summary>
+    /// <remarks>
+    /// SHA-256 truncated to 16 bytes. Not a security boundary — this only needs to be
+    /// deterministic and collision-free over a handful of ids per city — but MD5 is rejected
+    /// outright by the analyzers regardless of use, and arguing with that rule is not worth
+    /// the sixteen extra bytes of hashing.
+    /// </remarks>
+    private static Guid DeterministicGuid(string value)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value));
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    private static string SerialiseBuffer(BuildingInstance building) =>
+        JsonSerializer.Serialize(
+            building.OutputBuffer.ToDictionary(pair => pair.Key.Value, pair => pair.Value),
+            Json);
+
+    private static IEnumerable<KeyValuePair<ResourceId, long>> DeserialiseBuffer(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json == "{}")
+        {
+            return [];
+        }
+
+        var map = JsonSerializer.Deserialize<Dictionary<string, long>>(json, Json) ?? [];
+        return map.Select(pair => new KeyValuePair<ResourceId, long>(ResourceId.From(pair.Key), pair.Value));
     }
 
     private static void SaveInventory(CityEntity entity, CityAggregate aggregate, Guid cityId)

@@ -9,6 +9,7 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
     public DbSet<CityBuildingEntity> CityBuildings => Set<CityBuildingEntity>();
     public DbSet<CityInventoryEntity> CityInventory => Set<CityInventoryEntity>();
     public DbSet<CityPlotEntity> CityPlots => Set<CityPlotEntity>();
+    public DbSet<TransportJobEntity> TransportJobs => Set<TransportJobEntity>();
     public DbSet<ResourceDefinitionEntity> ResourceDefinitions => Set<ResourceDefinitionEntity>();
     public DbSet<BuildingDefinitionEntity> BuildingDefinitions => Set<BuildingDefinitionEntity>();
     public DbSet<RecipeEntity> Recipes => Set<RecipeEntity>();
@@ -50,6 +51,7 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.HasMany(e => e.Buildings).WithOne().HasForeignKey(b => b.CityId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(e => e.Inventory).WithOne().HasForeignKey(i => i.CityId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(e => e.Plots).WithOne().HasForeignKey(p => p.CityId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(e => e.Transports).WithOne().HasForeignKey(t => t.CityId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<CityBuildingEntity>(entity =>
@@ -59,11 +61,21 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.Property(e => e.DefinitionId).HasMaxLength(64).IsRequired();
             entity.Property(e => e.State).HasMaxLength(32).IsRequired();
             entity.Property(e => e.HaltReason).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.OutputBuffer).HasColumnType("jsonb");
 
             // One building per plot, enforced by the database rather than by application
             // logic alone — this is what makes the concurrent-build test (T4) pass even if
             // two requests somehow got past the row lock.
             entity.HasIndex(e => new { e.CityId, e.Col, e.Row }).IsUnique();
+        });
+
+        builder.Entity<TransportJobEntity>(entity =>
+        {
+            entity.ToTable("transport_jobs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ResourceId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.CityId, e.ArrivesAtUtc });
+            entity.HasIndex(e => e.FromBuildingId);
         });
 
         builder.Entity<CityInventoryEntity>(entity =>

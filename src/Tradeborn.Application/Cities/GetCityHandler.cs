@@ -81,11 +81,13 @@ public sealed class GetCityHandler(
 
         // Only worth showing a recap for a real absence; a page refresh should not pop one.
         OfflineSummaryDto? summary = null;
-        if (settlement.ProducedAnything && now - settledFrom > TimeSpan.FromMinutes(2))
+        if (settlement.DeliveredAnything && now - settledFrom > TimeSpan.FromMinutes(2))
         {
+            // Deliveries, not gross production: goods still on a cart are not the player's to
+            // spend, and the recap must agree with the balances shown beside it.
             summary = new OfflineSummaryDto(
                 settledFrom,
-                settlement.Produced
+                settlement.Delivered
                     .OrderBy(pair => pair.Key.Value, StringComparer.Ordinal)
                     .Select(pair => new ResourceBalanceDto(pair.Key.Value, pair.Value, capacity))
                     .ToArray(),
@@ -94,6 +96,17 @@ public sealed class GetCityHandler(
                     .Select(b => b.Id)
                     .ToArray());
         }
+
+        var transports = city.Transports
+            .OrderBy(t => t.ArrivesAtUtc)
+            .Select(t => new TransportDto(
+                t.Id,
+                t.FromBuildingId,
+                t.Resource.Value,
+                t.Quantity,
+                t.DepartedAtUtc,
+                t.ArrivesAtUtc))
+            .ToArray();
 
         return new CityDto(
             aggregate.Name,
@@ -104,6 +117,7 @@ public sealed class GetCityHandler(
             plots,
             buildings,
             resources,
+            transports,
             summary);
     }
 }

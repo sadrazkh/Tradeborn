@@ -61,6 +61,43 @@ without a database has tested nothing, and hides the very problem it should surf
 | Tests | Unit, Architecture, Integration projects. |
 | CI | GitHub Actions: build, 3 test suites, client typecheck + build, bundle-size gate, gitleaks. |
 
+## Phase 5 — visible logistics (backend complete, renderer not started)
+
+| Deliverable | State |
+|---|---|
+| Per-building output buffer | ✅ |
+| `TransportJob` domain model | ✅ |
+| Dispatch and arrival inside settlement, grid-aligned | ✅ |
+| Nothing destroyed when storage fills | ✅ asserted |
+| Transport + buffer persistence, migration | ✅ `TransportAndBuffers` |
+| Transports exposed in the city DTO | ✅ with departure/arrival instants |
+| Offline recap reports **deliveries**, not gross production | ✅ |
+| Unit tests | ✅ 73 passing (10 new) |
+| **Vehicles rendered from real jobs** | ⬜ **not started** |
+
+**Goods no longer teleport — in the economy, not just the animation.** Production fills a
+building's local buffer; only a delivered `TransportJob` moves goods into the inventory where
+they can be spent. A sawmill genuinely cannot consume wood that is still on a cart.
+
+**Why the rate tests changed.** Several tests asserted storage after one hour and now see 119
+where they saw 120 — one unit is on a cart at any instant. They were rewritten to assert
+**gross production** from `SettlementResult.Produced`, because a rate is a property of the
+building while what sits in the warehouse is a property of logistics. Both are now tested,
+separately and honestly.
+
+**A bug this phase introduced and fixed.** Dispatching a load that storage could not accept
+made it bounce back to the buffer and be re-sent on the next step — an endless shuttle that
+never reached a fixed point, so a 30-day absence walked all 86 400 grid steps. A cart now
+leaves only with what storage can actually take, and space already claimed by carts on the
+road is subtracted so two of them cannot target the last free slot. Regression test:
+`A_full_warehouse_stops_dispatch_rather_than_shuttling_forever`.
+
+**Not started: the renderer.** `AgentRenderer` still shows carts wandering the road graph for
+atmosphere — they are not connected to real jobs. The server now sends every in-flight haul
+with absolute departure and arrival instants, which is exactly what a renderer needs to place
+a cart mid-journey after a reload, but nothing consumes it yet. This is the remaining work for
+slice steps 8 and 9 to be genuinely done.
+
 ## Phase 4 — production & inventory (code complete)
 
 Much of this phase already existed: the settlement engine, halt-on-input, halt-on-capacity,

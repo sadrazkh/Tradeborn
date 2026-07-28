@@ -63,11 +63,11 @@ public class ProductionControlTests
         Assert.Equal(0, city.Inventory.Get(Wood));
 
         camp.StartProduction();
-        SettlementEngine.Settle(city, SliceEconomy.Epoch.AddHours(4).AddSeconds(30));
+        var result = SettlementEngine.Settle(city, SliceEconomy.Epoch.AddHours(4).AddSeconds(30));
 
         // The banked 29 s plus a fresh 30 s window completes at least one cycle promptly,
         // and certainly not the four hours' worth that a naive elapsed-time model would grant.
-        Assert.InRange(city.Inventory.Get(Wood), 1, 3);
+        Assert.InRange(result.Produced[Wood], 1, 3);
     }
 
     [Fact]
@@ -85,8 +85,9 @@ public class ProductionControlTests
         Assert.True(running.Inventory.Get(Planks) > 0);
         Assert.Equal(0, paused.Inventory.Get(Planks));
 
-        // All 120 wood is retained rather than half of it becoming planks.
-        Assert.Equal(120, paused.Inventory.Get(Wood));
+        // Nearly all the wood is retained rather than half of it becoming planks. "Nearly"
+        // because a load is briefly on a cart at any instant.
+        Assert.InRange(paused.Inventory.Get(Wood), 115, 120);
         Assert.True(paused.Inventory.Get(Wood) > running.Inventory.Get(Wood));
     }
 

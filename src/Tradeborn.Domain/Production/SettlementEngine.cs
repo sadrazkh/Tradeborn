@@ -1,6 +1,7 @@
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Domain.Cities;
 using Tradeborn.Domain.Economy;
+using Tradeborn.Domain.Logistics;
 
 namespace Tradeborn.Domain.Production;
 
@@ -10,24 +11,23 @@ namespace Tradeborn.Domain.Production;
 /// <remarks>
 /// <para>
 /// Nothing advances until someone looks. Calling <see cref="Settle"/> brings a city from
-/// <see cref="City.LastSettledAt"/> up to a given instant, respecting the three limits that
-/// a naive <c>elapsed × rate</c> calculation ignores: available time, available inputs, and
-/// free storage. It also completes any build or upgrade whose deadline has passed.
+/// <see cref="City.LastSettledAt"/> up to a given instant: completing builds, landing
+/// deliveries, running production, and dispatching carts.
 /// </para>
 /// <para><b>Why a fixed grid.</b> Sub-steps are aligned to an absolute time grid
 /// (multiples of <see cref="StepMilliseconds"/> since the Unix epoch) rather than being
 /// derived from the elapsed span. This is what makes the determinism invariant hold
 /// exactly: settling once over eight hours walks precisely the same grid cells as settling
 /// 480 times over one minute each, so both produce identical state. A step size computed
-/// from the elapsed span would produce different cell boundaries in the two cases and the
-/// results would diverge.</para>
-/// <para><b>Why deferred commit.</b> Within a step, outputs accumulate in a buffer and are
-/// added to the inventory only at the end. Without this a consumer could use, in the very
-/// same step, goods its upstream producer had not yet made — a small but real way for the
-/// economy to create value from nothing.</para>
-/// <para><b>Why it is fast.</b> Once every producing building is halted, no construction is
-/// pending, and a full step yields nothing, the state is a fixed point: no further step can
-/// change anything until the player acts. Settlement stops there.</para>
+/// from the elapsed span would produce different cell boundaries and the results would
+/// diverge.</para>
+/// <para><b>Why goods pass through a buffer.</b> Production fills a building's local output
+/// buffer; only a delivered <see cref="TransportJob"/> moves goods into the city's
+/// inventory. That is what makes "goods do not teleport" (GDD §3.5) true of the economy
+/// rather than merely of the animation.</para>
+/// <para><b>Why it is fast.</b> Once every producing building is halted or idle, no cart is
+/// on the road, and no construction is pending, the state is a fixed point: no further step
+/// can change anything until the player acts. Settlement stops there.</para>
 /// </remarks>
 public static class SettlementEngine
 {
@@ -59,6 +59,7 @@ public static class SettlementEngine
         }
 
         var produced = new Dictionary<ResourceId, long>();
+        var delivered = new Dictionary<ResourceId, long>();
         var completed = new List<string>();
 
         var producers = city.Buildings
@@ -78,17 +79,22 @@ public static class SettlementEngine
                 stepEnd = now;
             }
 
-            // Completions run first so a building that finishes at this boundary produces for
-            // the rest of the step rather than idling until the next one.
+            // Order matters. Completions first, so a building that finishes at this boundary
+            // works for the rest of the step. Then arrivals, so goods a cart just brought are
+            // available to consumers in the same step. Production last, filling buffers that
+            // the dispatch pass then loads onto carts.
             var anyCompleted = CompleteFinishedWork(city, stepEnd, completed);
+            var anyDelivery = DeliverArrivals(city, stepEnd, delivered);
 
             var deltaMs = (long)(stepEnd - cursor).TotalMilliseconds;
             var anyProduction = AdvanceStep(city, producers, deltaMs, produced);
 
+            DispatchTransports(city, producers, stepEnd);
+
             cursor = stepEnd;
             steps++;
 
-            if (IsFixedPoint(city, producers, anyProduction, anyCompleted, now))
+            if (IsFixedPoint(city, producers, anyProduction || anyDelivery, anyCompleted, now))
             {
                 break;
             }
@@ -96,7 +102,7 @@ public static class SettlementEngine
 
         city.LastSettledAt = now;
 
-        return new SettlementResult(now, steps, produced, completed);
+        return new SettlementResult(now, steps, produced, completed, delivered);
     }
 
     /// <summary>
@@ -124,7 +130,7 @@ public static class SettlementEngine
         if (any)
         {
             // A finished warehouse adds storage; capacity is derived, so it must be recomputed
-            // before the production pass decides whether anything is full.
+            // before deliveries decide how much they can unload.
             city.RecomputeCapacity();
         }
 
@@ -132,26 +138,141 @@ public static class SettlementEngine
     }
 
     /// <summary>
+    /// Unloads carts that have arrived.
+    /// </summary>
+    /// <remarks>
+    /// A load that does not fit is <b>not</b> destroyed: the remainder returns to the
+    /// producer's buffer, which then fills and halts that building with
+    /// <see cref="HaltReason.NoCapacity"/>. Vaporising overflow would be the most infuriating
+    /// thing this game could do to a player who came back after a long absence.
+    /// </remarks>
+    private static bool DeliverArrivals(
+        City city,
+        DateTimeOffset at,
+        Dictionary<ResourceId, long> deliveredTotals)
+    {
+        var arrived = city.Transports.Where(t => t.HasArrivedBy(at)).ToArray();
+        if (arrived.Length == 0)
+        {
+            return false;
+        }
+
+        var any = false;
+
+        foreach (var job in arrived)
+        {
+            var space = city.Inventory.FreeSpace(job.Resource);
+            var accepted = Math.Min(job.Quantity, space);
+
+            if (accepted > 0)
+            {
+                city.Inventory.Add(job.Resource, accepted);
+                deliveredTotals[job.Resource] = deliveredTotals.GetValueOrDefault(job.Resource) + accepted;
+                job.Deliver(accepted);
+                any = true;
+            }
+
+            if (job.Quantity > 0)
+            {
+                city.BuildingById(job.FromBuildingId)?.AddToBuffer(job.Resource, job.Quantity);
+            }
+
+            city.RemoveTransport(job);
+        }
+
+        return any;
+    }
+
+    /// <summary>
+    /// Loads waiting goods onto a cart.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One cart per building at a time. That bounds the vehicles on screen by the number of
+    /// producers, which is what keeps the pooled renderer inside the draw-call budget — and it
+    /// is the reason the output buffer exists at all.
+    /// </para>
+    /// <para>
+    /// A cart only leaves with what storage can actually accept. Sending a load that cannot be
+    /// unloaded would have it bounce straight back to the buffer and be dispatched again on the
+    /// next step — an endless shuttle that never terminates and, worse, never reaches a fixed
+    /// point, so a month-long absence would walk all 86 400 grid steps.
+    /// </para>
+    /// </remarks>
+    private static void DispatchTransports(
+        City city,
+        IReadOnlyList<BuildingInstance> producers,
+        DateTimeOffset at)
+    {
+        var destination = city.DeliveryPoint;
+
+        foreach (var building in producers)
+        {
+            if (building.BufferedQuantity == 0 || city.HasTransportFrom(building.Id))
+            {
+                continue;
+            }
+
+            var distance =
+                Math.Abs(building.Col - destination.Col) + Math.Abs(building.Row - destination.Row);
+            var travelMs = LogisticsTuning.TravelMilliseconds(distance);
+
+            // Snapshot the buffer: the loop below mutates it.
+            foreach (var (resource, buffered) in building.OutputBuffer.ToArray())
+            {
+                // Space already claimed by carts on the road, so two of them cannot both
+                // target the last free slot.
+                var inFlight = city.Transports
+                    .Where(t => t.Resource == resource)
+                    .Sum(t => t.Quantity);
+
+                var room = Math.Max(0, city.Inventory.FreeSpace(resource) - inFlight);
+                var load = Math.Min(buffered, room);
+
+                if (load <= 0)
+                {
+                    continue; // storage is full; the goods wait here and the building halts
+                }
+
+                building.TakeFromBuffer(resource, load);
+
+                // A deterministic id, not a random Guid: settling the same city twice must
+                // produce identical state, ids included.
+                var id = $"{building.Id}:{resource.Value}:{at.ToUnixTimeMilliseconds()}";
+
+                city.AddTransport(new TransportJob(
+                    id, building.Id, resource, load, at, at.AddMilliseconds(travelMs)));
+            }
+        }
+    }
+
+    /// <summary>
     /// True when no further step could change anything.
     /// </summary>
     /// <remarks>
-    /// Pending construction is part of the test. Without it, a city whose buildings are all
-    /// halted would exit early and skip past a build that was due to complete — the build
-    /// would land on the next read instead of this one.
+    /// Pending construction and carts on the road are both part of the test. Without them, a
+    /// city whose buildings are all halted would exit early and skip past a build that was due
+    /// to finish or a delivery that was due to land.
     /// </remarks>
     private static bool IsFixedPoint(
         City city,
         IReadOnlyList<BuildingInstance> producers,
-        bool anyProduction,
+        bool anythingHappened,
         bool anyCompleted,
         DateTimeOffset now)
     {
-        if (anyProduction || anyCompleted)
+        if (anythingHappened || anyCompleted)
         {
             return false;
         }
 
         if (city.Buildings.Any(b => b.IsUnderConstruction && b.CompletesAtUtc <= now))
+        {
+            return false;
+        }
+
+        // A cart still on the road will change the inventory when it lands.
+        if (city.Transports.Count > 0)
         {
             return false;
         }
@@ -176,8 +297,6 @@ public static class SettlementEngine
         long deltaMs,
         Dictionary<ResourceId, long> producedTotals)
     {
-        // Outputs land here and are committed after every building has been resolved.
-        var pending = new Dictionary<ResourceId, long>();
         var anyProduction = false;
 
         foreach (var building in producers)
@@ -206,20 +325,19 @@ public static class SettlementEngine
                 byInput = Math.Min(byInput, city.Inventory.Get(input.Resource) / input.Quantity);
             }
 
-            var byCapacity = long.MaxValue;
-            foreach (var output in recipe.Outputs)
-            {
-                pending.TryGetValue(output.Resource, out var reserved);
-                var free = Math.Max(0, city.Inventory.FreeSpace(output.Resource) - reserved);
-                byCapacity = Math.Min(byCapacity, free / output.Quantity);
-            }
+            // Output is limited by the building's own buffer, not by central storage: the
+            // goods are not in the warehouse yet, a cart still has to take them there.
+            var outputPerCycle = recipe.Outputs.Sum(o => o.Quantity);
+            var byCapacity = outputPerCycle <= 0
+                ? long.MaxValue
+                : building.BufferFreeSpace / outputPerCycle;
 
             var cycles = Math.Min(byTime, Math.Min(byInput, byCapacity));
 
             if (cycles > 0)
             {
-                // Inputs are consumed immediately so that two buildings competing for the
-                // same input in one step cannot both spend it.
+                // Inputs come out of central storage immediately, so two buildings competing
+                // for the same input in one step cannot both spend it.
                 foreach (var input in recipe.Inputs)
                 {
                     city.Inventory.Remove(input.Resource, input.Quantity * cycles);
@@ -228,7 +346,7 @@ public static class SettlementEngine
                 foreach (var output in recipe.Outputs)
                 {
                     var quantity = output.Quantity * cycles;
-                    pending[output.Resource] = pending.GetValueOrDefault(output.Resource) + quantity;
+                    building.AddToBuffer(output.Resource, quantity);
                     producedTotals[output.Resource] = producedTotals.GetValueOrDefault(output.Resource) + quantity;
                 }
 
@@ -248,11 +366,6 @@ public static class SettlementEngine
             }
         }
 
-        foreach (var (resource, quantity) in pending)
-        {
-            city.Inventory.Add(resource, quantity);
-        }
-
         return anyProduction;
     }
 }
@@ -262,10 +375,21 @@ public sealed record SettlementResult(
     DateTimeOffset SettledAt,
     int StepsRun,
     IReadOnlyDictionary<ResourceId, long> Produced,
-    IReadOnlyList<string> CompletedBuildings)
+    IReadOnlyList<string> CompletedBuildings,
+    IReadOnlyDictionary<ResourceId, long> Delivered)
 {
     public static SettlementResult Empty(DateTimeOffset at) =>
-        new(at, 0, new Dictionary<ResourceId, long>(), []);
+        new(at, 0, new Dictionary<ResourceId, long>(), [], new Dictionary<ResourceId, long>());
 
     public bool ProducedAnything => Produced.Count > 0;
+
+    /// <summary>
+    /// What actually reached storage.
+    /// </summary>
+    /// <remarks>
+    /// The offline recap reports this rather than <see cref="Produced"/>. Goods still on a cart
+    /// are not yet the player's to spend, and claiming otherwise would make the recap disagree
+    /// with the balances shown right next to it.
+    /// </remarks>
+    public bool DeliveredAnything => Delivered.Count > 0;
 }

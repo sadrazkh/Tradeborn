@@ -1,5 +1,6 @@
 using Tradeborn.Domain.Common;
 using Tradeborn.Domain.Economy;
+using Tradeborn.Domain.Logistics;
 using Tradeborn.Domain.Production;
 
 namespace Tradeborn.Domain.Buildings;
@@ -186,6 +187,69 @@ public sealed class BuildingInstance
     /// Discarding it would silently destroy production every time the player refreshed.
     /// </remarks>
     public long ProgressMilliseconds { get; internal set; }
+
+    /// <summary>
+    /// Finished goods waiting for a cart.
+    /// </summary>
+    /// <remarks>
+    /// Production lands here, not in the city's inventory. Goods become spendable only when a
+    /// <see cref="Tradeborn.Domain.Logistics.TransportJob"/> delivers them — which is what
+    /// makes "goods do not teleport" true of the economy and not just of the animation.
+    /// </remarks>
+    public IReadOnlyDictionary<ResourceId, long> OutputBuffer => outputBuffer;
+
+    private readonly Dictionary<ResourceId, long> outputBuffer = [];
+
+    public long BufferedQuantity => outputBuffer.Values.Sum();
+
+    public long BufferFreeSpace => Math.Max(0, LogisticsTuning.BufferCapacity - BufferedQuantity);
+
+    internal void AddToBuffer(ResourceId resource, long quantity)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(quantity);
+        if (quantity == 0)
+        {
+            return;
+        }
+
+        outputBuffer[resource] = outputBuffer.GetValueOrDefault(resource) + quantity;
+    }
+
+    /// <summary>Removes a partial load for a cart, leaving anything storage cannot accept.</summary>
+    internal void TakeFromBuffer(ResourceId resource, long quantity)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(quantity);
+
+        var held = outputBuffer.GetValueOrDefault(resource);
+        if (quantity > held)
+        {
+            throw new InvalidOperationException(
+                $"Cannot take {quantity} of '{resource}' from '{Id}': only {held} buffered.");
+        }
+
+        var remaining = held - quantity;
+        if (remaining == 0)
+        {
+            outputBuffer.Remove(resource);
+        }
+        else
+        {
+            outputBuffer[resource] = remaining;
+        }
+    }
+
+    /// <summary>Restores state loaded from the database.</summary>
+    public void RestoreOutputBuffer(IEnumerable<KeyValuePair<ResourceId, long>> contents)
+    {
+        outputBuffer.Clear();
+        foreach (var (resource, quantity) in contents)
+        {
+            if (quantity > 0)
+            {
+                outputBuffer[resource] = quantity;
+            }
+        }
+    }
 
     /// <summary>When the in-flight build or upgrade finishes. Null when nothing is in flight.</summary>
     public DateTimeOffset? CompletesAtUtc { get; private set; }

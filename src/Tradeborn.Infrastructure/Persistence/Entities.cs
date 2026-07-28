@@ -43,6 +43,7 @@ public sealed class CityEntity
     public List<CityBuildingEntity> Buildings { get; set; } = [];
     public List<CityInventoryEntity> Inventory { get; set; } = [];
     public List<CityPlotEntity> Plots { get; set; } = [];
+    public List<TransportJobEntity> Transports { get; set; } = [];
 }
 
 public sealed class CityBuildingEntity
@@ -62,6 +63,33 @@ public sealed class CityBuildingEntity
 
     /// <summary>Level once the in-flight work lands. Equal to <see cref="Level"/> when idle.</summary>
     public int PendingLevel { get; set; }
+
+    /// <summary>
+    /// Finished goods waiting for a cart, as a JSON resource→quantity map.
+    /// </summary>
+    /// <remarks>
+    /// Stored as a document rather than a child table: it is small, always read and written
+    /// with its building, and never queried across cities. A join table would cost a round
+    /// trip on the hot city-read path to buy nothing.
+    /// </remarks>
+    public string OutputBuffer { get; set; } = "{}";
+}
+
+/// <summary>A load of goods in transit from a producer to central storage.</summary>
+/// <remarks>
+/// Persisted because it <b>is</b> the economy, not decoration. If these were only client-side
+/// animation state, closing the tab mid-haul would destroy the goods — which is precisely the
+/// failure GDD §3.5 exists to rule out.
+/// </remarks>
+public sealed class TransportJobEntity
+{
+    public Guid Id { get; set; }
+    public Guid CityId { get; set; }
+    public Guid FromBuildingId { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public long Quantity { get; set; }
+    public DateTimeOffset DepartedAtUtc { get; set; }
+    public DateTimeOffset ArrivesAtUtc { get; set; }
 }
 
 public sealed class CityInventoryEntity

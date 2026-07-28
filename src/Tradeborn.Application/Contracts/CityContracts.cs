@@ -18,7 +18,24 @@ public sealed record CityDto(
     IReadOnlyList<PlotDto> Plots,
     IReadOnlyList<BuildingDto> Buildings,
     IReadOnlyList<ResourceBalanceDto> Resources,
+    IReadOnlyList<TransportDto> Transports,
     OfflineSummaryDto? OfflineSummary);
+
+/// <summary>
+/// A load on the road.
+/// </summary>
+/// <remarks>
+/// Departure and arrival are absolute server instants rather than a progress fraction, so a
+/// client that loads mid-journey can place the cart at the right point on the road instead of
+/// restarting the trip from the depot.
+/// </remarks>
+public sealed record TransportDto(
+    string Id,
+    string FromBuildingId,
+    string Resource,
+    long Quantity,
+    DateTimeOffset DepartedAtUtc,
+    DateTimeOffset ArrivesAtUtc);
 
 public sealed record PlotDto(int Col, int Row, string Terrain, bool Unlocked);
 

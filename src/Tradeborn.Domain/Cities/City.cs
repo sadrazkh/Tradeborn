@@ -1,5 +1,6 @@
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Domain.Common;
+using Tradeborn.Domain.Logistics;
 using Tradeborn.Domain.Production;
 
 namespace Tradeborn.Domain.Cities;
@@ -15,6 +16,7 @@ public sealed class City
 {
     private readonly List<BuildingInstance> buildings = [];
     private readonly Dictionary<(int Col, int Row), CityPlot> plots = [];
+    private readonly List<TransportJob> transports = [];
 
     public City(string id, DateTimeOffset createdAt)
     {
@@ -71,6 +73,42 @@ public sealed class City
 
     public BuildingInstance? BuildingById(string id) =>
         buildings.FirstOrDefault(b => string.Equals(b.Id, id, StringComparison.Ordinal));
+
+    // ---- Logistics -------------------------------------------------------------------------
+
+    /// <summary>Loads currently on the road.</summary>
+    public IReadOnlyList<TransportJob> Transports => transports;
+
+    public bool HasTransportFrom(string buildingId) =>
+        transports.Any(t => string.Equals(t.FromBuildingId, buildingId, StringComparison.Ordinal));
+
+    internal void AddTransport(TransportJob job) => transports.Add(job);
+
+    internal void RemoveTransport(TransportJob job) => transports.Remove(job);
+
+    /// <summary>Restores in-flight jobs loaded from the database.</summary>
+    public void RestoreTransports(IEnumerable<TransportJob> jobs)
+    {
+        transports.Clear();
+        transports.AddRange(jobs);
+    }
+
+    /// <summary>
+    /// Where deliveries go, in plot coordinates.
+    /// </summary>
+    /// <remarks>
+    /// The city centre. Warehouses raise capacity rather than acting as separate destinations,
+    /// so there is exactly one delivery point and travel time is a pure function of where the
+    /// producer stands — which keeps journey durations deterministic.
+    /// </remarks>
+    public (int Col, int Row) DeliveryPoint
+    {
+        get
+        {
+            var centre = buildings.FirstOrDefault(b => b.Definition.IsCityCentre);
+            return centre is null ? (0, 0) : (centre.Col, centre.Row);
+        }
+    }
 
     /// <summary>Builds and upgrades currently in flight. Bounded by <see cref="ConstructionSlots"/>.</summary>
     public int ActiveConstructions => buildings.Count(b => b.IsUnderConstruction);

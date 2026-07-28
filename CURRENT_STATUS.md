@@ -3,9 +3,35 @@
 > Updated at the end of every phase and whenever work stops. Its purpose is that anyone —
 > including a future session with no memory of this one — can resume in one read.
 
-**Phase:** 0 (Discovery, design & technical validation) — **complete**
-**Next:** Phase 1 — Foundation
+**Phase:** 0 complete · Phase 1 **in progress** (domain core done, persistence next)
 **Branch:** `main`
+
+## Phase 1 progress
+
+| Step | State |
+|---|---|
+| 1. Confirm the prototype visually in a real browser | ⛔ blocked — see "Not verified" below |
+| 2. `Tradeborn.Domain` project | ✅ |
+| 3. `Money` value object, resource types, settlement engine | ✅ 26 unit tests passing |
+| 4. `Tradeborn.Application` / `.Infrastructure` projects | ⬜ |
+| 5. EF Core + PostgreSQL, initial migration | ⬜ |
+| 6. Idempotent seed from `RESOURCE_GRAPH.md` §4 | ⬜ |
+| 7. Auth (JWT + rotating refresh cookie) | ⬜ |
+| 8. Serilog, OpenTelemetry, health checks, rate limiting | ⬜ |
+| 9. Integration + Architecture test projects | ⬜ |
+| 10. CI pipeline | ⬜ |
+| 11. Replace `/api/prototype/city` with the real Cities endpoint | ⬜ |
+
+**Domain core is complete and green:** `Money` (exact `long` cent arithmetic, throws rather
+than going negative or wrapping), the resource/recipe/building model, and the Deterministic
+Lazy Settlement engine. Zero external dependencies, warnings-as-errors, 26 passing tests
+covering the published rates at every level, both determinism invariants, all three halt
+limits, and clock-skew safety.
+
+Three design decisions were changed during implementation because the code proved the
+original plan wrong; all three are documented in the commit and the affected docs updated:
+cycle-time scaling instead of quantity scaling, a fixed epoch-aligned sub-step grid instead
+of a span-derived one, and end-of-step output commit.
 
 ---
 
@@ -82,20 +108,21 @@ Phase 1 task, and it gates whether [R-01](docs/roadmap/RISKS.md) (art quality) i
 - [x] App verified running: health, API, and SPA all serve
 - [ ] Visual confirmation — **blocked on a browser that composites**
 
-## Next: Phase 1 — Foundation
+## Next actions
 
-In order:
-
-1. Confirm the prototype visually in a real browser; record FPS and draw calls
-2. Add `Tradeborn.Domain`, `.Application`, `.Infrastructure` projects
-3. `Money` value object (`long` cent) and strongly-typed ids
-4. EF Core + PostgreSQL (`:5432` confirmed available), initial migration
-5. Idempotent seed of resources, buildings, and recipes from `docs/economy/RESOURCE_GRAPH.md` §4
-6. Auth: register/login, JWT + rotating refresh cookie ([ADR-007](docs/adr/ADR-007-authentication.md))
-7. Serilog + correlation id, OpenTelemetry, health checks, rate limiting
-8. Test projects: Unit, Integration, Architecture
-9. CI: build, test, bundle-size gate, gitleaks
-10. Replace `/api/prototype/city` with the real Cities endpoint
+1. **Open <http://localhost:5084> in a real browser.** Confirm the city looks right and
+   record FPS and draw calls from the debug overlay. This gates whether
+   [R-01](docs/roadmap/RISKS.md) (art quality) is on track and is the one thing that cannot
+   be done from here.
+2. Add `Tradeborn.Application` and `Tradeborn.Infrastructure` projects.
+3. EF Core + PostgreSQL, initial migration, idempotent seed from
+   [`RESOURCE_GRAPH.md`](docs/economy/RESOURCE_GRAPH.md) §4 — replacing the in-code
+   `SliceEconomy` fixture the unit tests currently build from. The tests should keep passing
+   unchanged; that is the point of keeping the numbers in one documented place.
+4. Auth ([ADR-007](docs/adr/ADR-007-authentication.md)), observability, rate limiting.
+5. Integration + Architecture test projects.
+6. CI: build, test, bundle-size gate, gitleaks.
+7. Replace `/api/prototype/city` with the real Cities endpoint.
 
 **Environment notes carried forward:** PostgreSQL is available on `:5432`. Redis is **not**
 installed — Phase 1 must boot without it ([A-01](docs/roadmap/DECISIONS_REQUIRED.md)). Docker
@@ -107,4 +134,5 @@ is **not** installed — integration tests must fall back to a local connection 
 | Phase | SHA | Message |
 |---|---|---|
 | 0 | `570c208` | `docs: define game vision, economy, architecture and phase plan` |
-| 0 | *(pending)* | `feat(prototype): validate Babylon scene inside ASP.NET host` |
+| 0 | `8d735b0` | `feat(prototype): validate Babylon scene inside ASP.NET host` |
+| 1 | `09c608e` | `feat(economy): add domain core and deterministic settlement engine` |

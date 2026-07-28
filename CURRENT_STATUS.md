@@ -61,6 +61,41 @@ without a database has tested nothing, and hides the very problem it should surf
 | Tests | Unit, Architecture, Integration projects. |
 | CI | GitHub Actions: build, 3 test suites, client typecheck + build, bundle-size gate, gitleaks. |
 
+## Phase 4 — production & inventory (code complete)
+
+Much of this phase already existed: the settlement engine, halt-on-input, halt-on-capacity,
+offline progression and the determinism tests all landed in Phase 1. What was genuinely
+missing was **the player's control over production** — slice step 7.
+
+| Deliverable | State |
+|---|---|
+| Recipes, inventory, capacity, DLS engine | ✅ (Phase 1) |
+| Halt on missing input / full storage with reasons | ✅ (Phase 1) |
+| Offline progression + determinism tests | ✅ (Phase 1) |
+| **Explicit start / pause of production** | ✅ domain, command, endpoint |
+| Production animations and warning motes | ✅ (Phase 2/3) |
+| Building panel: recipe, rate, halt reason, controls | ✅ |
+| "While you were away" recap | ✅ — server returned it since Phase 1, nothing showed it |
+| N+1 query guard on the city read path | ✅ interceptor + assertion (needs a DB to run) |
+| Unit tests | ✅ 63 passing (13 new) |
+
+**A finished building now waits to be switched on.** Previously it auto-started. Two design
+documents call for the player to start it (`VERTICAL_SLICE.md` step 7,
+`PLAYER_JOURNEY.md` 1:40–2:10), and the change buys something the auto-start version could
+not: a **pause lever**. Stopping the sawmill banks wood for a Bakery instead of converting it
+to planks — which is the surplus decision from `ECONOMY_DESIGN.md` §3 turned into a control
+the player can actually pull. A test asserts exactly that.
+
+A finished **upgrade** resumes on its own. The player already had it running; making them
+switch it back on would be a chore, not a decision.
+
+**Idle is silent.** A building the player switched off reports no halt reason and shows no
+warning mote. Showing a warning over something they turned off themselves would train them to
+ignore warnings — and the mote is how the game says "this needs you".
+
+The production command carries the **desired state, not a toggle**. A retried toggle is not
+idempotent: a dropped response would flip the building back to the opposite of what was asked.
+
 ## Phase 3 — construction & upgrade (code complete)
 
 | Deliverable | State |

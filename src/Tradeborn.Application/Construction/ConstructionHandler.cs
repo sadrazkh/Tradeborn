@@ -237,7 +237,7 @@ public sealed class ConstructionHandler(
             building.PendingLevel,
             building.ConstructionProgress(now));
 
-    private static IReadOnlyList<ResourceBalanceDto> Snapshot(City city)
+    private static ResourceBalanceDto[] Snapshot(City city)
     {
         var capacity = city.Inventory.CapacityPerResource;
         return city.Inventory

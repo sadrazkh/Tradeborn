@@ -252,11 +252,64 @@ public sealed class BuildingInstance
             return false;
         }
 
+        var wasUpgrade = PendingLevel > Level;
+
         Level = PendingLevel;
         CompletesAtUtc = null;
         HaltReason = HaltReason.None;
-        State = Definition.Recipe is null ? BuildingState.Idle : BuildingState.Producing;
+
+        // A finished *upgrade* resumes on its own — the player already had it running and
+        // stopping it would be a chore, not a decision. A brand-new building waits to be
+        // started, which is slice step 7 and the beat PLAYER_JOURNEY.md builds the tutorial
+        // around. Storage buildings have no recipe and are simply Idle either way.
+        State = Definition.Recipe is not null && wasUpgrade
+            ? BuildingState.Producing
+            : BuildingState.Idle;
+
         return true;
+    }
+
+    /// <summary>Whether the player can currently switch this building on.</summary>
+    public bool CanStartProduction =>
+        Definition.Recipe is not null && !IsUnderConstruction && State == BuildingState.Idle;
+
+    /// <summary>Whether the player can currently switch this building off.</summary>
+    public bool CanStopProduction =>
+        Definition.Recipe is not null &&
+        !IsUnderConstruction &&
+        State is BuildingState.Producing or BuildingState.Halted;
+
+    public void StartProduction()
+    {
+        if (!CanStartProduction)
+        {
+            throw new InvalidOperationException($"Building '{Id}' cannot start producing (state {State}).");
+        }
+
+        State = BuildingState.Producing;
+        HaltReason = HaltReason.None;
+    }
+
+    /// <summary>
+    /// Pauses production.
+    /// </summary>
+    /// <remarks>
+    /// A real economic lever, not just a convenience: stopping the sawmill banks wood for a
+    /// bakery instead of turning it into planks. That is the surplus decision from
+    /// ECONOMY_DESIGN.md §3 expressed as a control the player can actually pull.
+    ///
+    /// Banked cycle progress is kept, so pausing briefly costs nothing — pausing must never
+    /// feel like a punishment.
+    /// </remarks>
+    public void StopProduction()
+    {
+        if (!CanStopProduction)
+        {
+            throw new InvalidOperationException($"Building '{Id}' is not producing (state {State}).");
+        }
+
+        State = BuildingState.Idle;
+        HaltReason = HaltReason.None;
     }
 
     /// <summary>Build progress in 0..1, for the staged construction visuals.</summary>

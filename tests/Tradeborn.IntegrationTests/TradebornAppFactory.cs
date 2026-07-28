@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -50,6 +51,9 @@ public sealed class RequiresPostgresFactAttribute : FactAttribute
 
 public sealed class TradebornAppFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    /// <summary>Counts SQL commands so tests can assert the absence of N+1 queries.</summary>
+    public QueryCountingInterceptor Queries { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(Environments.Development);
@@ -62,6 +66,13 @@ public sealed class TradebornAppFactory : WebApplicationFactory<Program>, IAsync
                 // Deterministic, and obviously not a production value.
                 ["Tradeborn:Auth:SigningKey"] = "integration-test-signing-key-at-least-32-chars",
             });
+        });
+
+        builder.ConfigureServices(services =>
+        {
+            // Registered as a singleton interceptor so it observes every DbContext instance,
+            // including the scoped ones the endpoints create per request.
+            services.AddSingleton<IInterceptor>(Queries);
         });
     }
 

@@ -196,6 +196,40 @@ async function commandRequest(
   }
 }
 
+export interface ProductionResponse {
+  accepted: boolean
+  refusalCode: string | null
+  refusalMessage: string | null
+  building: BuildingDto | null
+  serverTimeUtc: string
+}
+
+/**
+ * Switches a building's production on or off.
+ *
+ * Sends the desired state, not a "toggle": a retried toggle is not idempotent and would
+ * leave the city in the opposite state to the one the player asked for.
+ */
+export async function setProduction(
+  buildingId: string,
+  active: boolean,
+  idempotencyKey: string,
+): Promise<ProductionResponse> {
+  const path = `/api/cities/me/buildings/${encodeURIComponent(buildingId)}/production`
+  try {
+    return await request<ProductionResponse>(path, {
+      method: 'PUT',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ active }),
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.refusal) {
+      return error.refusal as ProductionResponse
+    }
+    throw error
+  }
+}
+
 export function newIdempotencyKey(): string {
   return crypto.randomUUID()
 }

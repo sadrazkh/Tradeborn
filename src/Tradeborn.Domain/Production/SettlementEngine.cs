@@ -156,7 +156,11 @@ public static class SettlementEngine
             return false;
         }
 
-        return producers.All(b => b.IsUnderConstruction || b.HaltReason != HaltReason.None);
+        // Idle counts as settled: a switched-off building cannot change without the player.
+        return producers.All(b =>
+            b.IsUnderConstruction ||
+            b.State == BuildingState.Idle ||
+            b.HaltReason != HaltReason.None);
     }
 
     private static DateTimeOffset NextGridBoundary(DateTimeOffset from)
@@ -178,8 +182,10 @@ public static class SettlementEngine
 
         foreach (var building in producers)
         {
-            // A half-built factory produces nothing.
-            if (building.IsUnderConstruction)
+            // A half-built factory produces nothing, and neither does one the player has
+            // switched off. Idle is a deliberate choice, so it is silent — no halt reason,
+            // no warning mote.
+            if (building.IsUnderConstruction || building.State == BuildingState.Idle)
             {
                 continue;
             }

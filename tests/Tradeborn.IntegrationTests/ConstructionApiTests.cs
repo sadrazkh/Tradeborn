@@ -73,9 +73,16 @@ public sealed class ConstructionApiTests(TradebornAppFactory factory) : IClassFi
         var accepted = 0;
         foreach (var response in responses)
         {
-            if (response.StatusCode != HttpStatusCode.OK) continue;
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                continue;
+            }
+
             var body = await response.Content.ReadFromJsonAsync<ConstructionResponseDto>();
-            if (body!.Accepted) accepted++;
+            if (body!.Accepted)
+            {
+                accepted++;
+            }
         }
 
         Assert.Equal(1, accepted);

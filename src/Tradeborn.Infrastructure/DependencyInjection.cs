@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Tradeborn.Application.Abstractions;
 using Tradeborn.Application.Cities;
 using Tradeborn.Application.Construction;
+using Tradeborn.Application.Production;
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Infrastructure.Identity;
 using Tradeborn.Infrastructure.Persistence;
@@ -45,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<GameCatalogSeeder>();
         services.AddScoped<GetCityHandler>();
         services.AddScoped<ConstructionHandler>();
+        services.AddScoped<ProductionHandler>();
 
         var auth = configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new AuthOptions();
         if (string.IsNullOrWhiteSpace(auth.SigningKey) || auth.SigningKey.Length < 32)

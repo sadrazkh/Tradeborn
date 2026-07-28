@@ -199,22 +199,24 @@ public class ConstructionTests
     // -----------------------------------------------------------------------------------
 
     [Fact]
-    public void A_building_completes_during_settlement_and_starts_producing()
+    public void A_finished_building_waits_to_be_switched_on()
     {
+        // Slice step 7: the player starts production. Auto-starting would remove the beat
+        // PLAYER_JOURNEY.md builds the tutorial around, and with it the pause lever that
+        // makes the surplus decision in ECONOMY_DESIGN.md §3 actionable.
         var city = SliceEconomy.WithCapacity(10_000);
         city.Add(BuildingInstance.PlaceNew("camp", SliceEconomy.LumberCamp, 1, 2, SliceEconomy.Epoch));
 
-        // 30 s build, then the rest of the hour producing.
         SettlementEngine.Settle(city, SliceEconomy.Epoch.AddHours(1));
 
         var camp = city.BuildingById("camp")!;
-        Assert.Equal(BuildingState.Producing, camp.State);
+        Assert.Equal(BuildingState.Idle, camp.State);
         Assert.Null(camp.CompletesAtUtc);
-        Assert.True(city.Inventory.Get(Wood) > 0, "The camp should have produced wood after completing.");
+        Assert.Equal(0, city.Inventory.Get(Wood));
     }
 
     [Fact]
-    public void A_new_players_first_camp_fills_the_town_hall_and_halts_on_capacity()
+    public void A_started_camp_fills_the_town_hall_and_halts_on_capacity()
     {
         // Not a defect — this is the designed signal from ECONOMY_DESIGN.md §8. A new city
         // holds 100 per resource and starts with 80 wood, so the first Lumber Camp fills it
@@ -222,12 +224,29 @@ public class ConstructionTests
         var city = SliceEconomy.NewPlayerCity();
         city.Add(BuildingInstance.PlaceNew("camp", SliceEconomy.LumberCamp, 1, 2, SliceEconomy.Epoch));
 
+        SettlementEngine.Settle(city, SliceEconomy.Epoch.AddMinutes(1));
+        city.BuildingById("camp")!.StartProduction();
         SettlementEngine.Settle(city, SliceEconomy.Epoch.AddHours(1));
 
         var camp = city.BuildingById("camp")!;
         Assert.Equal(100, city.Inventory.Get(Wood));   // capped, nothing destroyed
         Assert.Equal(BuildingState.Halted, camp.State);
         Assert.Equal(HaltReason.NoCapacity, camp.HaltReason);
+    }
+
+    [Fact]
+    public void A_finished_upgrade_resumes_production_on_its_own()
+    {
+        // An upgrade is different from a new build: the player already had it running, so
+        // making them switch it back on would be a chore rather than a decision.
+        var city = SliceEconomy.WithBuildings((SliceEconomy.LumberCamp, 1));
+        var camp = city.Buildings.Single(b => b.Definition.Id == "lumber_camp");
+
+        camp.BeginUpgrade(SliceEconomy.Epoch);
+        SettlementEngine.Settle(city, SliceEconomy.Epoch.AddMinutes(5));
+
+        Assert.Equal(2, camp.Level);
+        Assert.Equal(BuildingState.Producing, camp.State);
     }
 
     [Fact]

@@ -293,6 +293,14 @@ export class GameBridge {
     this.placement?.markOccupied(dto.col, dto.row)
   }
 
+  /** Applies a server-confirmed change to a building already in the scene. */
+  updateBuilding(dto: BuildingDto): void {
+    this.buildings?.updateBuilding(dto)
+    // The HUD panel reads from the selection, so it has to be re-emitted or it would keep
+    // showing "Not running" for a building that just started.
+    this.selection?.refresh()
+  }
+
   focusOnPlot(col: number, row: number, gridSize: number): void {
     const grid = new PlotGrid(gridSize)
     this.camera?.focusOn(grid.toWorld(col, row))

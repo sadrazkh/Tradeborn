@@ -72,6 +72,11 @@ export interface SelectionInfo {
   col: number
   row: number
   level?: number
+  /** Present for buildings — lets the panel look up the recipe and rate. */
+  definitionId?: string
+  haltReason?: string | null
+  completesAtUtc?: string | null
+  pendingLevel?: number
 }
 
 export type RendererBackend = 'webgpu' | 'webgl2' | 'webgl1'

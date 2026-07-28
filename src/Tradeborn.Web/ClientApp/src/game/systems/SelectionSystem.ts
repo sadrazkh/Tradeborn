@@ -12,7 +12,7 @@ import '@babylonjs/core/Meshes/Builders/torusBuilder'
 import type { MaterialLibrary } from '../assets/MaterialLibrary'
 import type { BuildingRenderer } from '../entities/BuildingRenderer'
 import { PLOT_SIZE, PlotGrid } from '../world/PlotGrid'
-import type { SelectionInfo } from '../types'
+import type { BuildingDto, SelectionInfo } from '../types'
 
 const BUILDING_LABELS: Record<string, string> = {
   town_hall: 'Town Hall',
@@ -90,16 +90,7 @@ export class SelectionSystem {
       const dto = this.buildings.get(meta.buildingId)
       if (!dto) return this.select(null)
 
-      this.select({
-        kind: 'building',
-        id: dto.id,
-        title: BUILDING_LABELS[dto.definitionId] ?? dto.definitionId,
-        subtitle: `Level ${dto.level}`,
-        state: dto.state,
-        col: dto.col,
-        row: dto.row,
-        level: dto.level,
-      })
+      this.select(describe(dto))
       return
     }
 
@@ -147,16 +138,12 @@ export class SelectionSystem {
   selectBuilding(buildingId: string): void {
     const dto = this.buildings.get(buildingId)
     if (!dto) return
-    this.select({
-      kind: 'building',
-      id: dto.id,
-      title: BUILDING_LABELS[dto.definitionId] ?? dto.definitionId,
-      subtitle: `Level ${dto.level}`,
-      state: dto.state,
-      col: dto.col,
-      row: dto.row,
-      level: dto.level,
-    })
+    this.select(describe(dto))
+  }
+
+  /** Re-emits the current selection so the panel picks up a changed building state. */
+  refresh(): void {
+    if (this.selectedId) this.selectBuilding(this.selectedId)
   }
 
   onSelectionChanged(listener: (info: SelectionInfo | null) => void): () => void {
@@ -179,5 +166,23 @@ export class SelectionSystem {
     if (this.observer) this.scene.onPointerObservable.remove(this.observer)
     this.ring?.dispose()
     this.listeners.clear()
+  }
+}
+
+/** One place that turns a building into the shape the HUD panel consumes. */
+function describe(dto: BuildingDto): SelectionInfo {
+  return {
+    kind: 'building',
+    id: dto.id,
+    title: BUILDING_LABELS[dto.definitionId] ?? dto.definitionId,
+    subtitle: `Level ${dto.level}`,
+    state: dto.state,
+    col: dto.col,
+    row: dto.row,
+    level: dto.level,
+    definitionId: dto.definitionId,
+    haltReason: dto.haltReason ?? null,
+    completesAtUtc: dto.completesAtUtc ?? null,
+    pendingLevel: dto.pendingLevel ?? dto.level,
   }
 }

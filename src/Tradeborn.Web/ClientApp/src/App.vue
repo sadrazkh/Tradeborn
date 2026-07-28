@@ -1,12 +1,26 @@
 <script setup lang="ts">
 import { markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { GameBridge } from '@/game/GameBridge'
-import { fetchCity, newIdempotencyKey, startConstruction, tryRefresh } from '@/api/client'
-import type { PerfSample, RendererBackend, ResourceBalanceDto, SelectionInfo } from '@/game/types'
+import {
+  fetchCity,
+  newIdempotencyKey,
+  setProduction,
+  startConstruction,
+  startUpgrade,
+  tryRefresh,
+} from '@/api/client'
+import type {
+  OfflineSummaryDto,
+  PerfSample,
+  RendererBackend,
+  ResourceBalanceDto,
+  SelectionInfo,
+} from '@/game/types'
 import DebugOverlay from '@/ui/DebugOverlay.vue'
 import SelectionCard from '@/ui/SelectionCard.vue'
 import BuildBar from '@/ui/BuildBar.vue'
 import ToastStack from '@/ui/ToastStack.vue'
+import OfflineRecap from '@/ui/OfflineRecap.vue'
 import type { BuildOption, Toast } from '@/ui/uiTypes'
 import AuthScreen from '@/ui/AuthScreen.vue'
 
@@ -34,6 +48,7 @@ const cityLevel = ref(1)
 const placing = ref(false)
 const commandBusy = ref(false)
 const toasts = ref<Toast[]>([])
+const offlineSummary = ref<OfflineSummaryDto | null>(null)
 let toastId = 0
 
 /**
@@ -77,6 +92,7 @@ async function startGame() {
     cityName.value = city.name
     balanceCoins.value = city.balanceCoins
     resources.value = city.resources
+    offlineSummary.value = city.offlineSummary ?? null
 
     if (!canvas.value) throw new Error('Canvas element was not mounted')
 
@@ -157,6 +173,62 @@ function beginPlacement(definitionId: string) {
 function cancelPlacement() {
   placing.value = false
   bridge.value?.cancelPlacement()
+}
+
+/**
+ * Switches a building's production on or off.
+ *
+ * The building's own state comes back from the server and is applied to the scene, so the
+ * panel and the 3D city can never disagree about whether something is running.
+ */
+async function onSetProduction(payload: { buildingId: string; active: boolean }) {
+  if (commandBusy.value) return
+  commandBusy.value = true
+
+  try {
+    const result = await setProduction(payload.buildingId, payload.active, newIdempotencyKey())
+
+    if (!result.accepted) {
+      toast(result.refusalMessage ?? 'That could not be changed.', 'warn')
+      return
+    }
+
+    if (result.building) {
+      bridge.value?.updateBuilding(result.building)
+      toast(payload.active ? 'Production started.' : 'Production paused.')
+    }
+  } catch (error) {
+    console.error('[Tradeborn] Production toggle failed', error)
+    toast('Could not reach the server.', 'warn')
+  } finally {
+    commandBusy.value = false
+  }
+}
+
+async function onUpgrade(buildingId: string) {
+  if (commandBusy.value) return
+  commandBusy.value = true
+
+  try {
+    const result = await startUpgrade(buildingId, newIdempotencyKey())
+
+    if (!result.accepted) {
+      toast(result.refusalMessage ?? 'That upgrade was refused.', 'warn')
+      return
+    }
+
+    balanceCoins.value = result.balanceCoins
+    resources.value = result.resources
+    if (result.building) {
+      bridge.value?.updateBuilding(result.building)
+      toast('Upgrade started.')
+    }
+  } catch (error) {
+    console.error('[Tradeborn] Upgrade failed', error)
+    toast('Could not reach the server. Nothing was charged.', 'warn')
+  } finally {
+    commandBusy.value = false
+  }
 }
 
 /**
@@ -242,7 +314,12 @@ async function confirmBuild(definitionId: string, col: number, row: number) {
       </span>
     </div>
 
-    <SelectionCard :selection="selection" />
+    <SelectionCard
+      :selection="selection"
+      :busy="commandBusy"
+      @set-production="onSetProduction"
+      @upgrade="onUpgrade"
+    />
 
     <BuildBar
       :options="buildOptions"
@@ -256,6 +333,8 @@ async function confirmBuild(definitionId: string, col: number, row: number) {
     />
 
     <ToastStack :toasts="toasts" />
+
+    <OfflineRecap :summary="offlineSummary" @dismiss="offlineSummary = null" />
 
     <div class="hint-bar tb-panel">
       {{ placing ? 'Tap a highlighted plot to build · Esc to cancel' : 'Drag to orbit · Scroll to zoom · Click a building or plot' }}

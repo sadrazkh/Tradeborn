@@ -152,6 +152,59 @@ export class BuildingRenderer {
   /** Server time when this city was loaded, used to anchor construction timelines. */
   loadedAtServerMs = 0
 
+  /**
+   * Applies a server-confirmed change to an existing building.
+   *
+   * Rebuilds the model only when the mesh would actually differ — a level change. A state
+   * change (started, paused, halted) only swaps animation and motes, and tearing down 30
+   * meshes to express "the saw is now turning" would drop a frame for nothing.
+   */
+  updateBuilding(dto: BuildingDto): void {
+    const entry = this.placed.get(dto.id)
+    if (!entry) {
+      this.add(dto)
+      return
+    }
+
+    const levelChanged = entry.dto.level !== dto.level
+    entry.dto = dto
+
+    if (dto.state === 'Halted' && !entry.halted) {
+      this.showHaltMote(entry)
+    } else if (dto.state !== 'Halted' && entry.halted) {
+      entry.halted.dispose()
+      entry.halted = null
+    }
+
+    if (dto.state === 'UnderConstruction' && !entry.construction) {
+      entry.construction = new ConstructionVisual(
+        this.scene, this.materials, entry.root, entry.height,
+        entry.root.position.x, entry.root.position.z)
+      entry.construction.update(dto.constructionProgress ?? 0, 0)
+      return
+    }
+
+    if (levelChanged) {
+      this.rebuildModel(entry, dto)
+    }
+  }
+
+  /** Replaces the mesh tree in place, keeping the picker and position. */
+  private rebuildModel(entry: PlacedBuilding, dto: BuildingDto): void {
+    entry.construction?.dispose()
+    entry.construction = null
+
+    const position = entry.root.position.clone()
+    entry.root.dispose(false, true)
+
+    const rebuilt = this.models.create(dto.definitionId, dto.level)
+    rebuilt.root.position.copyFrom(position)
+
+    entry.root = rebuilt.root
+    entry.spinners = rebuilt.spinners
+    entry.height = rebuilt.height
+  }
+
   get(id: string): BuildingDto | undefined {
     return this.placed.get(id)?.dto
   }

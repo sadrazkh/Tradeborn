@@ -73,6 +73,30 @@ builder.Services.AddRateLimiter(options =>
             ?? context.Connection.RemoteIpAddress?.ToString()
             ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 240, Window = TimeSpan.FromMinutes(1) }));
+
+    // Economic commands get a tighter limit than reads, and it stacks on top of "game".
+    // Reading your city 240 times a minute is merely wasteful; attempting 240 sales is
+    // someone probing for a race condition (SECURITY_MODEL.md §5, T9).
+    options.AddPolicy("command", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1) }));
+
+    // Registration is far more restricted than login: a stuffing attack retries one account
+    // many times, whereas mass registration creates many. Ten attempts per five minutes is
+    // right for the former and far too generous for the latter.
+    options.AddPolicy("register", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromHours(1) }));
+
+    // The admin surface was unlimited until this phase's review — an oversight, not a
+    // decision. Operator traffic is low volume, so the limit is generous but present.
+    options.AddPolicy("admin", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1) }));
 });
 
 builder.Services.AddHealthChecks();

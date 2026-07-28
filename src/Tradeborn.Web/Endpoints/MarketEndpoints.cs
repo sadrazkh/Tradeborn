@@ -84,7 +84,7 @@ public static class MarketEndpoints
                     statusCode: StatusCodes.Status409Conflict,
                     extensions: new Dictionary<string, object?> { ["code"] = "IDEMPOTENCY_KEY_REUSED" });
             }
-        });
+        }).RequireRateLimiting("command");
     }
 
     private static Guid? PlayerId(this ClaimsPrincipal user)

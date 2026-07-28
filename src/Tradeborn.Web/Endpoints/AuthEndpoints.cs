@@ -30,7 +30,7 @@ public static class AuthEndpoints
                 request.Email, request.Password, request.DisplayName, cancellationToken);
 
             return Complete(result, http);
-        });
+        }).RequireRateLimiting("register");
 
         group.MapPost("/login", async (
             LoginRequest request,

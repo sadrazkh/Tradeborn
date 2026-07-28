@@ -24,8 +24,8 @@ public static class AdminEndpoints
 {
     public static void MapAdminEndpoints(this WebApplication app)
     {
-        var read = app.MapGroup("/api/admin").RequireAuthorization("admin.read");
-        var write = app.MapGroup("/api/admin").RequireAuthorization("admin.write");
+        var read = app.MapGroup("/api/admin").RequireAuthorization("admin.read").RequireRateLimiting("admin");
+        var write = app.MapGroup("/api/admin").RequireAuthorization("admin.write").RequireRateLimiting("admin");
 
         // ---- Inspection ----------------------------------------------------------------
 

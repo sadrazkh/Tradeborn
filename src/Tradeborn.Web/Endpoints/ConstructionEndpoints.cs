@@ -46,7 +46,7 @@ public static class ConstructionEndpoints
                     StatusCodes.Status409Conflict,
                     "IDEMPOTENCY_KEY_REUSED");
             }
-        });
+        }).RequireRateLimiting("command");
 
         group.MapPost("/buildings/{buildingId}/upgrade", async (
             string buildingId,
@@ -85,7 +85,7 @@ public static class ConstructionEndpoints
                     StatusCodes.Status409Conflict,
                     "IDEMPOTENCY_KEY_REUSED");
             }
-        });
+        }).RequireRateLimiting("command");
     }
 
     public static void MapProductionEndpoints(this WebApplication app)
@@ -133,7 +133,7 @@ public static class ConstructionEndpoints
                     "Idempotency key reused", ex.Message,
                     StatusCodes.Status409Conflict, "IDEMPOTENCY_KEY_REUSED");
             }
-        });
+        }).RequireRateLimiting("command");
     }
 
     /// <summary>

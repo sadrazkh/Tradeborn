@@ -36,6 +36,10 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.Property(e => e.PasswordHash).HasMaxLength(256).IsRequired();
             entity.Property(e => e.DisplayName).HasMaxLength(64).IsRequired();
             entity.Property(e => e.Role).HasMaxLength(32).IsRequired();
+
+            // The admin list orders by newest first. Without this, every page load sorts the
+            // whole players table — invisible at ten accounts, painful at ten thousand.
+            entity.HasIndex(e => e.CreatedAtUtc);
             entity.HasOne(e => e.City)
                   .WithOne(c => c.Player)
                   .HasForeignKey<CityEntity>(c => c.PlayerId)
@@ -177,6 +181,11 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ResourceId).HasMaxLength(64).IsRequired();
             entity.HasIndex(e => new { e.ResourceId, e.RecordedAtUtc });
+
+            // The composite above leads with ResourceId, so it cannot serve the sparkline
+            // query — which orders by time across *all* resources at once. A separate index
+            // on the timestamp alone is what that query actually needs.
+            entity.HasIndex(e => e.RecordedAtUtc);
         });
 
         builder.Entity<RecipeEntity>(entity =>

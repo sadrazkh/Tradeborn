@@ -102,6 +102,43 @@ horizons and three archetypes) and the scripted economic event. Both are listed 
 and neither is built. The simulator matters most — it is what would prove no dominant strategy
 exists, and right now that claim rests on design reasoning rather than measurement.
 
+## Phase 9 — hardening & roadmap
+
+| Deliverable | State |
+|---|---|
+| Security review against T1–T12 | ✅ **found and fixed 3 real gaps** |
+| Hot-path indexes | ✅ 2 real gaps found by reading the queries |
+| Load-test harness | ✅ written · ⛔ **never run** — no deployed environment |
+| Tech-debt inventory | ✅ [`TECH_DEBT.md`](docs/roadmap/TECH_DEBT.md) |
+| Post-slice roadmap | ✅ [`NEXT_MILESTONE.md`](docs/roadmap/NEXT_MILESTONE.md) |
+| Redis / SignalR scale strategy | ✅ documented in the review and deployment docs |
+| Capacity limits | ⛔ **cannot be produced here** — see below |
+
+**The review found three genuine gaps, all mine, all now fixed:**
+
+1. **Admin endpoints had no rate limiting at all** — every other group had it; `/api/admin` got
+   only authorisation. An oversight from Phase 8, not a decision.
+2. **Economic commands only had the general 240/min limit** — the spec says 60/min for commands
+   specifically, which is exactly the budget an attacker probing for a race wants.
+3. **Registration shared login's limit** — 10 per 5 minutes is right for a stuffing attack
+   against one account and far too generous for mass registration. It permitted 120 accounts
+   per hour per IP against a specified 5.
+
+**Two index gaps found by reading the queries, not guessing:** `players.CreatedAtUtc` (the admin
+list sorts by it on every page load) and `market_price_history.RecordedAtUtc` — the existing
+composite index leads with `ResourceId`, so it could not serve the sparkline query that orders
+by time across all resources.
+
+⛔ **No capacity numbers exist.** A load test needs a deployed instance, and Tradeborn has never
+been deployed. The harness is written and ready; every figure in `PERFORMANCE_BUDGET.md` §6
+remains a target. Producing numbers here would mean inventing them.
+
+**The review's honest conclusion:** the structural controls (T1, T2, T5, T7, T10) are strong
+because the design makes violations *unexpressible* — those hold regardless of test coverage.
+The controls that depend on runtime behaviour (T3 double-charge, T4 double-spend) have tests
+that have never executed. Until they run, "no double-spend" is a well-argued claim, not a
+verified fact.
+
 ## Phase 8 — admin & operations (API complete, no panel UI)
 
 | Deliverable | State |

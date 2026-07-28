@@ -1,0 +1,12 @@
+# EF Core generates these files. Linting them produces warnings nobody can act on without
+# hand-editing generated code, which would then be overwritten by the next scaffold.
+#
+# This does NOT relax analysis anywhere else — the rules stay at full strength for the code
+# we actually write.
+[*.cs]
+generated_code = true
+
+dotnet_diagnostic.IDE0161.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1707.severity = none

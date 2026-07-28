@@ -55,6 +55,31 @@ public sealed class BuildingInstance
         State = definition.Recipe is null ? BuildingState.Idle : BuildingState.Producing;
     }
 
+    /// <summary>
+    /// Rebuilds a building from stored state.
+    /// </summary>
+    /// <remarks>
+    /// An explicit factory rather than <c>InternalsVisibleTo</c> or public setters. Loading
+    /// from the database is a genuinely different operation from placing a new building —
+    /// it must restore progress and halt state verbatim, and it must not be reachable from
+    /// gameplay code. Naming it makes that distinction visible at the call site.
+    /// </remarks>
+    public static BuildingInstance Rehydrate(
+        string id,
+        BuildingDefinition definition,
+        int col,
+        int row,
+        int level,
+        BuildingState state,
+        HaltReason haltReason,
+        long progressMilliseconds) =>
+        new(id, definition, col, row, level)
+        {
+            State = state,
+            HaltReason = haltReason,
+            ProgressMilliseconds = progressMilliseconds,
+        };
+
     public string Id { get; }
     public BuildingDefinition Definition { get; }
     public int Col { get; }

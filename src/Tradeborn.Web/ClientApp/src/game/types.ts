@@ -25,12 +25,28 @@ export interface BuildingDto {
   state: BuildingState
 }
 
+export interface ResourceBalanceDto {
+  resource: string
+  quantity: number
+  capacity: number
+}
+
+export interface OfflineSummaryDto {
+  since: string
+  produced: ResourceBalanceDto[]
+  haltedBuildings: string[]
+}
+
 export interface CityDto {
   name: string
   gridSize: number
   serverTimeUtc: string
+  balanceCoins: number
+  capacityPerResource: number
   plots: PlotDto[]
   buildings: BuildingDto[]
+  resources: ResourceBalanceDto[]
+  offlineSummary?: OfflineSummaryDto | null
 }
 
 /** What the HUD shows when the player selects something in the world. */

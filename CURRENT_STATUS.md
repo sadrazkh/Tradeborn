@@ -3,131 +3,119 @@
 > Updated at the end of every phase and whenever work stops. Its purpose is that anyone —
 > including a future session with no memory of this one — can resume in one read.
 
-**Phase:** 0 complete · Phase 1 **in progress** (domain core done, persistence next)
-**Branch:** `main`
-
-## Phase 1 progress
-
-| Step | State |
-|---|---|
-| 1. Confirm the prototype visually in a real browser | ⛔ blocked — see "Not verified" below |
-| 2. `Tradeborn.Domain` project | ✅ |
-| 3. `Money` value object, resource types, settlement engine | ✅ 26 unit tests passing |
-| 4. `Tradeborn.Application` / `.Infrastructure` projects | ⬜ |
-| 5. EF Core + PostgreSQL, initial migration | ⬜ |
-| 6. Idempotent seed from `RESOURCE_GRAPH.md` §4 | ⬜ |
-| 7. Auth (JWT + rotating refresh cookie) | ⬜ |
-| 8. Serilog, OpenTelemetry, health checks, rate limiting | ⬜ |
-| 9. Integration + Architecture test projects | ⬜ |
-| 10. CI pipeline | ⬜ |
-| 11. Replace `/api/prototype/city` with the real Cities endpoint | ⬜ |
-
-**Domain core is complete and green:** `Money` (exact `long` cent arithmetic, throws rather
-than going negative or wrapping), the resource/recipe/building model, and the Deterministic
-Lazy Settlement engine. Zero external dependencies, warnings-as-errors, 26 passing tests
-covering the published rates at every level, both determinism invariants, all three halt
-limits, and clock-skew safety.
-
-Three design decisions were changed during implementation because the code proved the
-original plan wrong; all three are documented in the commit and the affected docs updated:
-cycle-time scaling instead of quantity scaling, a fixed epoch-aligned sub-step grid instead
-of a span-derived one, and end-of-step output commit.
+**Phase:** 0 complete · Phase 1 **code complete, database verification pending**
+**Branch:** `main` · **Working tree: uncommitted — the user commits.**
 
 ---
 
-## What works right now
+## ⚠️ One thing blocks the rest
 
-Run it:
+PostgreSQL is running on `:5432` but rejects `postgres/postgres`
+(`SqlState 28P01: password authentication failed`). Migrations, seed, and the six
+integration tests cannot run until real credentials are configured.
+
+**You said you would set this yourself. One command:**
 
 ```bash
-cd src/Tradeborn.Web/ClientApp && npm ci && npm run build && cd ../../.. && dotnet run --project src/Tradeborn.Web/Tradeborn.Web.csproj -p:SkipSpaBuild=true --urls http://localhost:5084
+dotnet user-secrets --project src/Tradeborn.Web set "ConnectionStrings:Postgres" "Host=localhost;Port=5432;Database=tradeborn;Username=postgres;Password=YOUR_PASSWORD"
 ```
 
-| Capability | State |
+The JWT signing key needs nothing in development — `appsettings.Development.json` carries a
+clearly-labelled dev-only value so a fresh clone runs with one less step. Production has an
+empty key in `appsettings.json` and **fails fast at startup** with an explanatory message
+rather than silently signing tokens with a known constant.
+
+Then integration tests, against a **separate** database (they drop and recreate the schema):
+
+```bash
+export TRADEBORN_TEST_POSTGRES="Host=localhost;Port=5432;Database=tradeborn_test;Username=postgres;Password=YOUR_PASSWORD" && dotnet test -p:SkipSpaBuild=true
+```
+
+Once that is set, the app creates the database and applies migrations on first start.
+
+---
+
+## Verified green
+
+```
+dotnet build           0 warnings, 0 errors   (whole solution, clean build)
+vue-tsc --noEmit       0 errors
+Unit tests            26/26 passed
+Architecture tests     7/7  passed
+Integration tests      6    SKIPPED with a message (no database configured)
+Client build           472 KB gzip total JS
+```
+
+The integration tests skipping rather than passing is deliberate. A test that goes green
+without a database has tested nothing, and hides the very problem it should surface.
+
+## What exists now
+
+| Layer | State |
 |---|---|
-| ASP.NET Core 10 host serving the SPA from `wwwroot` | ✅ |
-| `GET /health/live` | ✅ 200 |
-| `GET /api/prototype/city` — server-supplied world layout | ✅ 200, valid JSON |
-| Babylon.js scene, WebGL2 | ✅ |
-| WebGPU opt-in via `?webgpu=1` with WebGL2 fallback | ✅ implemented, **fallback path not yet exercised on a WebGPU-capable browser** |
-| Isometric camera: orbit / pan / zoom, 45° snap, β locked at 55° | ✅ (β verified as exactly 55.00°) |
-| 8×8 plot grid, 3 terrain types, locked/unlocked plots | ✅ |
-| 5 procedural buildings with distinct silhouettes | ✅ |
-| Building selection + contextual HUD card | ✅ (verified via test bridge) |
-| Day/night lighting interpolation | ✅ |
-| `window.__tradeborn` debug bridge | ✅ (debug builds only; stripped from production) |
-| Loading and error states | ✅ |
+| `Tradeborn.Domain` | Money, resources, recipes, buildings, inventory, city, settlement engine. **Zero external dependencies**, warnings-as-errors. |
+| `Tradeborn.Application` | Contracts, abstractions (`ICityStore`, `IGameCatalog`, `ICacheStore`, `IAdvisorService`), `GetCityHandler`. |
+| `Tradeborn.Infrastructure` | EF Core + PostgreSQL, 10 tables, initial migration, idempotent catalog seeder, city provisioner, JWT auth with refresh-token rotation. |
+| `Tradeborn.Web` | Minimal APIs, auth endpoints, `/api/cities/me`, Serilog, rate limiting, health checks, auth-by-default. |
+| `ClientApp` | Babylon city, isometric camera, selection, day/night, **login/register screen**, resource + coin HUD. |
+| Tests | Unit, Architecture, Integration projects. |
+| CI | GitHub Actions: build, 3 test suites, client typecheck + build, bundle-size gate, gitleaks. |
 
-## Measurements
+## 3D bugs reported and fixed this session
 
-| Metric | Measured | Budget | Verdict |
-|---|---|---|---|
-| Initial JS, gzipped | **472 KB** (babylon 436 + vendor 27 + app 9) | ≤ 1 100 KB | ✅ 57 % headroom |
-| Babylon chunk, gzipped | **436 KB** | ≤ 900 KB | ✅ |
-| App shell, gzipped | **36 KB** | ≤ 180 KB | ✅ |
-| Triangles in scene | **7 068** | ≤ 150 000 | ✅ |
-| `dotnet build` | 0 warnings, 0 errors | 0 warnings | ✅ |
-| `vue-tsc --noEmit` | 0 errors | 0 errors | ✅ |
+You said the 3D view was glitching and jumping. Three causes, all real:
 
-**This substantially de-risks [R-02](docs/roadmap/RISKS.md) (Babylon bundle size).** The
-tree-shaken engine came in at less than half its budget, so no mitigation is needed beyond
-keeping the per-module import discipline.
+1. **`scene.autoClearDepthAndStencil = false`** — I had set this as a micro-optimisation. It
+   leaves the depth buffer holding the previous frame's values, so with a moving camera
+   geometry flickers in and out as stale depth wins the test. **This was the main cause.**
+   Removed, with a comment explaining why it must not come back.
+2. **The 45° camera snap fought Babylon's inertia** — my tween wrote `camera.alpha` every
+   frame while `inertialAlphaOffset` was also still adding to it. Two writers, visible
+   oscillation. The tween now suppresses the inertial offsets for its duration.
+3. **The snap ran on every `pointerup`, including a plain click** — so selecting a building
+   swung the camera. That violated my own rule in `SCENE_GUIDELINES.md` §2 ("the camera never
+   moves on a tap"). It now requires actual pointer travel.
 
-## Not verified — and why
+Also: the day/night cycle ran a full day every 125 s, fast enough to read as flickering
+light rather than passing time. Slowed to the documented 4 minutes.
 
-**Frame rate and draw calls have NOT been measured.** Neither browser surface available in
-this environment composites frames: the in-app pane is not displayed, so
-`requestAnimationFrame` is fully paused, and the Chrome extension is not connected. Readings
-taken in that state (`fps: 60`, `drawCalls: 0`) are stale initial values, not measurements,
-and are treated as unknown.
+## Other fixes worth knowing about
 
-**No screenshot of the rendered scene exists.** The visual result is therefore unconfirmed.
-What *is* confirmed is that the scene graph is correctly constructed from server data:
-renderer backend, camera angles, triangle count, mesh hierarchy, building states and levels,
-and programmatic selection all return correct values.
+- **EF Core version conflict** — Npgsql resolved EF 10.0.4 while Design/Binder pulled 10.0.10.
+  Left alone this is an `MSB3277` warning; at runtime a mismatched provider pair fails. All
+  EF packages are now pinned together with a comment saying to bump them as a set.
+- **Analyzer warnings in the EF-generated migration** — scoped `.editorconfig` marks that
+  folder as generated rather than weakening analysis project-wide.
+- **A fake architecture test** — my first clock guard checked for member *names* that could
+  never exist in those assemblies, so it could not fail. Rewritten to scan IL for calls to
+  `DateTime.UtcNow` / `DateTimeOffset.UtcNow`, then **verified by deliberately introducing
+  the violation in both Domain and Application and confirming it failed each time.**
 
-**Action for the next session:** open <http://localhost:5084> in a real browser, confirm the
-city looks right, and record FPS and draw calls from the debug overlay. This is the first
-Phase 1 task, and it gates whether [R-01](docs/roadmap/RISKS.md) (art quality) is on track.
+## Still not verified
 
-## Bugs found and fixed in Phase 0
-
-| Bug | Fix |
-|---|---|
-| Canvas backing buffer stuck at 300×150 when the canvas was first measured while hidden — scene would render at wrong resolution, stretched | Added a `ResizeObserver` on the canvas in `GameBridge`; a `window.resize` listener alone does not catch element-level size changes. Verified: backing buffer now tracks CSS size (1280×720) |
-| Draw-call metric counted active meshes, which double-counts instances that collapse into one draw call — would have made the performance budget meaningless | Replaced with Babylon's `SceneInstrumentation.drawCallsCounter` |
-| Debug bridge stripped from *all* built artefacts, leaving E2E unable to inspect the canvas | Added a `debug` Vite mode (`npm run build:debug`); production builds still strip it |
-| `vue-tsc` errors: `location` unresolved in template, missing Node types | Extracted a `reload()` method; added `@types/node` |
-
-## Phase 0 deliverables
-
-- [x] 20 design documents (vision, GDD, economy, art, architecture, roadmap, testing, ops)
-- [x] 8 ADRs
-- [x] Technical prototype: scene, camera, selection, FPS overlay, WebGPU/WebGL2, ASP.NET integration
-- [x] Build verified: `dotnet build` clean, `vue-tsc` clean, SPA builds
-- [x] App verified running: health, API, and SPA all serve
-- [ ] Visual confirmation — **blocked on a browser that composites**
+**Frame rate and draw calls remain unmeasured, and no screenshot of the scene exists.**
+Neither browser surface available here composites frames — the in-app pane is not displayed,
+so `requestAnimationFrame` is fully paused, and the Chrome extension is not connected. The
+fixes above are reasoned from the code and are all well-understood Babylon failure modes,
+but **I have not seen the flickering stop.** Please confirm visually.
 
 ## Next actions
 
-1. **Open <http://localhost:5084> in a real browser.** Confirm the city looks right and
-   record FPS and draw calls from the debug overlay. This gates whether
-   [R-01](docs/roadmap/RISKS.md) (art quality) is on track and is the one thing that cannot
-   be done from here.
-2. Add `Tradeborn.Application` and `Tradeborn.Infrastructure` projects.
-3. EF Core + PostgreSQL, initial migration, idempotent seed from
-   [`RESOURCE_GRAPH.md`](docs/economy/RESOURCE_GRAPH.md) §4 — replacing the in-code
-   `SliceEconomy` fixture the unit tests currently build from. The tests should keep passing
-   unchanged; that is the point of keeping the numbers in one documented place.
-4. Auth ([ADR-007](docs/adr/ADR-007-authentication.md)), observability, rate limiting.
-5. Integration + Architecture test projects.
-6. CI: build, test, bundle-size gate, gitleaks.
-7. Replace `/api/prototype/city` with the real Cities endpoint.
+1. Set the two user secrets above.
+2. Run the app, confirm the 3D view no longer jumps, and read FPS/draw calls off the debug
+   overlay. This also closes the last open item from Phase 0.
+3. Run the integration tests with `TRADEBORN_TEST_POSTGRES` set.
+4. Then Phase 2 — the living city (see [IMPLEMENTATION_PLAN.md](docs/roadmap/IMPLEMENTATION_PLAN.md)).
 
-**Environment notes carried forward:** PostgreSQL is available on `:5432`. Redis is **not**
-installed — Phase 1 must boot without it ([A-01](docs/roadmap/DECISIONS_REQUIRED.md)). Docker
-is **not** installed — integration tests must fall back to a local connection string via
-`TRADEBORN_TEST_POSTGRES` ([R-09](docs/roadmap/RISKS.md)).
+## Deferred from Phase 1, deliberately
+
+| Item | Why | When |
+|---|---|---|
+| Redis-backed cache and rate limiting | Not installed locally; in-memory implementation behind `ICacheStore`, so swapping is a one-line registration change ([A-01](docs/roadmap/DECISIONS_REQUIRED.md)) | Phase 3 |
+| `SELECT … FOR UPDATE` row lock on city | Only matters once write commands exist; the `xmin` concurrency token is already mapped | Phase 3 |
+| OpenTelemetry traces/metrics | Serilog + correlation logging is in; tracing has no consumer yet | Phase 8 |
+| Outbox and domain events | No second consumer until SignalR arrives | Phase 5 |
+| N+1 query-count assertion | The read path is written for it (`AsSplitQuery`) but the interceptor is not built | Phase 4 |
 
 ## Commits
 
@@ -136,3 +124,5 @@ is **not** installed — integration tests must fall back to a local connection 
 | 0 | `570c208` | `docs: define game vision, economy, architecture and phase plan` |
 | 0 | `8d735b0` | `feat(prototype): validate Babylon scene inside ASP.NET host` |
 | 1 | `09c608e` | `feat(economy): add domain core and deterministic settlement engine` |
+| 1 | `bb415b6` | `docs: record Phase 1 progress and next actions` |
+| 1 | *uncommitted* | 3D fixes, persistence, auth, endpoints, architecture + integration tests, CI |

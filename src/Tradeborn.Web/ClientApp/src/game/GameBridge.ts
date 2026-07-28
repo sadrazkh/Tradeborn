@@ -64,7 +64,12 @@ export class GameBridge {
     // Skipping pointer-move picking is a meaningful win: without it Babylon raycasts on
     // every mouse move even when nothing listens.
     scene.skipPointerMovePicking = true
-    scene.autoClearDepthAndStencil = false
+
+    // NOTE: do NOT set scene.autoClearDepthAndStencil = false here. It looks like a free
+    // optimisation but it leaves the depth buffer holding the previous frame's values, so
+    // with a moving camera geometry flickers in and out as old depth wins the test. It is
+    // only safe with a static camera or a manually managed rendering group order, and we
+    // have neither.
 
     this.materials = new MaterialLibrary(scene)
     const grid = new PlotGrid(city.gridSize)

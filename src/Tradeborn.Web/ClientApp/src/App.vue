@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { GameBridge } from '@/game/GameBridge'
-import { fetchPrototypeCity } from '@/api/client'
-import type { PerfSample, RendererBackend, SelectionInfo } from '@/game/types'
+import { fetchCity, tryRefresh } from '@/api/client'
+import type { PerfSample, RendererBackend, ResourceBalanceDto, SelectionInfo } from '@/game/types'
 import DebugOverlay from '@/ui/DebugOverlay.vue'
 import SelectionCard from '@/ui/SelectionCard.vue'
+import AuthScreen from '@/ui/AuthScreen.vue'
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 
@@ -15,9 +16,11 @@ const canvas = ref<HTMLCanvasElement | null>(null)
  */
 const bridge = shallowRef<GameBridge | null>(null)
 
-const status = ref<'loading' | 'ready' | 'error'>('loading')
+const status = ref<'loading' | 'auth' | 'ready' | 'error'>('loading')
 const errorMessage = ref('')
 const cityName = ref('')
+const balanceCoins = ref(0)
+const resources = ref<ResourceBalanceDto[]>([])
 const backend = ref<RendererBackend>('webgl2')
 const selection = ref<SelectionInfo | null>(null)
 const perf = ref<PerfSample>({ fps: 0, drawCalls: 0, triangles: 0, meshes: 0 })
@@ -31,9 +34,26 @@ let dayTimer: number | null = null
 const abort = new AbortController()
 
 onMounted(async () => {
+  // The SPA holds no access token after a page load, so it asks the server whether the
+  // HttpOnly refresh cookie still represents a session. This is what makes a refresh
+  // restore the game rather than bounce the player to a login screen (ADR-007).
+  const restored = await tryRefresh()
+  if (!restored) {
+    status.value = 'auth'
+    return
+  }
+
+  await startGame()
+})
+
+async function startGame() {
+  status.value = 'loading'
+
   try {
-    const city = await fetchPrototypeCity(abort.signal)
+    const city = await fetchCity(abort.signal)
     cityName.value = city.name
+    balanceCoins.value = city.balanceCoins
+    resources.value = city.resources
 
     if (!canvas.value) throw new Error('Canvas element was not mounted')
 
@@ -52,12 +72,16 @@ onMounted(async () => {
       p95.value = instance.p95Fps
     }, 500)
 
-    // A slow day/night cycle: one in-game day every four real minutes in the prototype,
-    // purely so the lighting rig can be evaluated without scrubbing by hand.
+    // One in-game day every four real minutes, purely so the lighting rig can be evaluated
+    // without scrubbing by hand. Ticked at 4 Hz rather than 10 Hz: the transition is a lerp,
+    // so a faster tick buys no smoothness, and a quicker cycle reads as the light flickering
+    // rather than as time passing.
+    const dayTickMs = 250
+    const dayLengthMs = 4 * 60 * 1000
     dayTimer = window.setInterval(() => {
-      timeOfDay.value = (timeOfDay.value + 0.0008) % 1
+      timeOfDay.value = (timeOfDay.value + dayTickMs / dayLengthMs) % 1
       instance.applyTimeOfDay(timeOfDay.value)
-    }, 100)
+    }, dayTickMs)
 
     status.value = 'ready'
   } catch (error) {
@@ -66,7 +90,7 @@ onMounted(async () => {
     errorMessage.value = error instanceof Error ? error.message : 'Unknown error'
     status.value = 'error'
   }
-})
+}
 
 onBeforeUnmount(() => {
   abort.abort()
@@ -90,8 +114,11 @@ function reload() {
 <template>
   <canvas id="renderCanvas" ref="canvas" touch-action="none"></canvas>
 
+  <!-- Not signed in -->
+  <AuthScreen v-if="status === 'auth'" @authenticated="startGame" />
+
   <!-- Loading state -->
-  <div v-if="status === 'loading'" class="overlay">
+  <div v-else-if="status === 'loading'" class="overlay">
     <div class="loader tb-panel">
       <div class="mark">TRADEBORN</div>
       <div class="bar"><span></span></div>
@@ -122,6 +149,14 @@ function reload() {
     <div class="city-name tb-panel">
       <span class="dot" aria-hidden="true"></span>
       {{ cityName }}
+      <span class="coins">{{ balanceCoins.toLocaleString() }}<i>c</i></span>
+    </div>
+
+    <div v-if="resources.length" class="resources tb-panel">
+      <span v-for="r in resources" :key="r.resource" class="res" :class="{ full: r.quantity >= r.capacity }">
+        <b>{{ r.quantity.toLocaleString() }}</b>
+        <span class="label">{{ r.resource }}</span>
+      </span>
     </div>
 
     <SelectionCard :selection="selection" />
@@ -221,6 +256,50 @@ function reload() {
   height: 6px;
   border-radius: 50%;
   background: var(--tb-success);
+}
+
+.city-name .coins {
+  margin-left: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--tb-border);
+  color: var(--tb-gold);
+  font-weight: 700;
+}
+
+.city-name .coins i {
+  font-style: normal;
+  opacity: 0.6;
+  margin-left: 2px;
+  font-size: 11px;
+}
+
+.resources {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
+  padding: 9px 14px;
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+}
+
+.res {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.res .label {
+  color: var(--tb-text-dim);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+/* Storage full is a design signal, not a failure — warn, never alarm. */
+.res.full b {
+  color: var(--tb-warning);
 }
 
 .hint-bar {

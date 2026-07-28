@@ -14,6 +14,36 @@
 | Redis | `:6379` | ❌ not installed — optional until Phase 3 ([A-01](../roadmap/DECISIONS_REQUIRED.md)) |
 | Docker | — | ❌ not installed — only needed for Testcontainers and CI ([R-09](../roadmap/RISKS.md)) |
 
+## Database credentials (do this first)
+
+The connection string in `appsettings.json` is a **placeholder with an empty password** and
+is not expected to work. Real credentials go in .NET User Secrets so they are never
+committed (`SECURITY_MODEL.md` §8).
+
+Set your local PostgreSQL password once:
+
+```bash
+dotnet user-secrets --project src/Tradeborn.Web set "ConnectionStrings:Postgres" "Host=localhost;Port=5432;Database=tradeborn;Username=postgres;Password=YOUR_PASSWORD"
+```
+
+The app creates the `tradeborn` database and applies migrations on first start, so the role
+needs `CREATEDB`.
+
+The JWT signing key needs no setup in development: `appsettings.Development.json` carries a
+clearly-labelled dev-only value. In production the key is empty in `appsettings.json` and
+startup **fails fast** with an explanatory message — signing tokens with a committed
+constant would be worse than not booting.
+
+For integration tests, point them at a **separate** database — they drop and recreate the
+schema on every run:
+
+```bash
+export TRADEBORN_TEST_POSTGRES="Host=localhost;Port=5432;Database=tradeborn_test;Username=postgres;Password=YOUR_PASSWORD"
+```
+
+Without `TRADEBORN_TEST_POSTGRES` the integration tests **skip with a message** rather than
+passing silently — a green tick that tested nothing is worse than a visible skip.
+
 ## First run
 
 ```bash

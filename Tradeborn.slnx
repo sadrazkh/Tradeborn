@@ -1,9 +1,13 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Tradeborn.Application/Tradeborn.Application.csproj" />
     <Project Path="src/Tradeborn.Domain/Tradeborn.Domain.csproj" />
+    <Project Path="src/Tradeborn.Infrastructure/Tradeborn.Infrastructure.csproj" />
     <Project Path="src/Tradeborn.Web/Tradeborn.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Tradeborn.ArchitectureTests/Tradeborn.ArchitectureTests.csproj" />
+    <Project Path="tests/Tradeborn.IntegrationTests/Tradeborn.IntegrationTests.csproj" />
     <Project Path="tests/Tradeborn.UnitTests/Tradeborn.UnitTests.csproj" />
   </Folder>
 </Solution>

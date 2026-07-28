@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # CI always has Docker, so integration tests run against a real PostgreSQL here even
+    # though the development machine falls back to a local instance (RISKS.md R-09).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tradeborn_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Tradeborn.Web/ClientApp/package-lock.json
+
+      - name: Restore .NET
+        run: dotnet restore
+
+      # Warnings are errors in Domain and Application (TEST_STRATEGY.md §8). The SPA is
+      # built separately below so a backend failure is not hidden behind a bundler error.
+      - name: Build
+        run: dotnet build --no-restore -c Release -p:SkipSpaBuild=true
+
+      - name: Unit tests
+        run: dotnet test tests/Tradeborn.UnitTests --no-build -c Release -p:SkipSpaBuild=true
+
+      - name: Architecture tests
+        run: dotnet test tests/Tradeborn.ArchitectureTests --no-build -c Release -p:SkipSpaBuild=true
+
+      - name: Integration tests
+        env:
+          TRADEBORN_TEST_POSTGRES: Host=localhost;Port=5432;Database=tradeborn_test;Username=postgres;Password=postgres
+        run: dotnet test tests/Tradeborn.IntegrationTests --no-build -c Release -p:SkipSpaBuild=true
+
+      - name: Install client dependencies
+        working-directory: src/Tradeborn.Web/ClientApp
+        run: npm ci
+
+      - name: Typecheck client
+        working-directory: src/Tradeborn.Web/ClientApp
+        run: npm run typecheck
+
+      - name: Build client
+        working-directory: src/Tradeborn.Web/ClientApp
+        run: npm run build
+
+      # A bundle that quietly grows past budget is a regression nobody notices until the
+      # loading screen gets long. See docs/architecture/PERFORMANCE_BUDGET.md §4.
+      - name: Enforce bundle budget
+        working-directory: src/Tradeborn.Web
+        run: |
+          BUDGET_KB=1500
+          TOTAL=$(find wwwroot/assets -name '*.js' -exec gzip -c {} \; | wc -c)
+          TOTAL_KB=$((TOTAL / 1024))
+          echo "Total gzipped JS: ${TOTAL_KB} KB (hard limit ${BUDGET_KB} KB)"
+          if [ "$TOTAL_KB" -gt "$BUDGET_KB" ]; then
+            echo "::error::Initial JS bundle is ${TOTAL_KB} KB gzipped, over the ${BUDGET_KB} KB budget."
+            exit 1
+          fi
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -104,7 +104,7 @@ Additional invariants:
 | Resolution scale | 0.75 | 1.0 | 1.0 (up to 2.0 DPR) |
 | Shadows | off | blob | 1024 shadow map |
 | Particles | off | 4 systems | 8 systems |
-| Citizens | 0 | 8 | 20 |
+| Citizens | 6 | 12 | 20 |
 | Prop density | 40 % | 70 % | 100 % |
 | Anti-aliasing | off | FXAA | FXAA |
 | Post-processing | off | off | bloom (subtle) |
@@ -112,6 +112,16 @@ Additional invariants:
 
 Default: **Medium on desktop, Low on mobile**, then auto-adjusted on measurement. Users can
 override manually and the override is remembered.
+
+> **Revised in Phase 2.** Low originally specified *zero* citizens. Once instancing was in
+> place, 20 citizens measured at ~2 draw calls in total — so removing them buys almost no
+> frame time while costing the strongest "the city is alive" cue on exactly the devices that
+> most need to feel good. Low now keeps 6. Resolution scale is the lever that actually pays
+> on mobile.
+
+Downgrades are automatic; **upgrades are not**. A scene that oscillates between presets looks
+worse than one sitting a tier too low, and the oscillation is far more noticeable than the
+missing detail. Stepping back up is a user action.
 
 ## 8. Enforcement
 

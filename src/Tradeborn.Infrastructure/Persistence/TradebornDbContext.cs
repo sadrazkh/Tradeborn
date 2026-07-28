@@ -13,7 +13,10 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
     public DbSet<BuildingDefinitionEntity> BuildingDefinitions => Set<BuildingDefinitionEntity>();
     public DbSet<RecipeEntity> Recipes => Set<RecipeEntity>();
     public DbSet<RecipeIngredientEntity> RecipeIngredients => Set<RecipeIngredientEntity>();
+    public DbSet<BuildingCostEntity> BuildingCosts => Set<BuildingCostEntity>();
     public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
+    public DbSet<IdempotencyKeyEntity> IdempotencyKeys => Set<IdempotencyKeyEntity>();
+    public DbSet<AuditLedgerEntity> AuditLedger => Set<AuditLedgerEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -91,6 +94,41 @@ public sealed class TradebornDbContext(DbContextOptions<TradebornDbContext> opti
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64);
             entity.Property(e => e.RecipeId).HasMaxLength(64);
+            entity.HasMany(e => e.Costs).WithOne().HasForeignKey(c => c.BuildingId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<BuildingCostEntity>(entity =>
+        {
+            entity.ToTable("building_costs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.BuildingId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ResourceId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.BuildingId, e.ResourceId }).IsUnique();
+        });
+
+        builder.Entity<IdempotencyKeyEntity>(entity =>
+        {
+            entity.ToTable("idempotency_keys");
+
+            // Composite primary key: the uniqueness constraint IS the mechanism. Two
+            // concurrent replays race to insert and exactly one wins (SECURITY_MODEL.md T3).
+            entity.HasKey(e => new { e.PlayerId, e.Key });
+            entity.Property(e => e.Key).HasMaxLength(128);
+            entity.Property(e => e.Operation).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => e.CreatedAtUtc);
+        });
+
+        builder.Entity<AuditLedgerEntity>(entity =>
+        {
+            entity.ToTable("audit_ledger");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CorrelationId).HasMaxLength(128);
+            entity.Property(e => e.IdempotencyKey).HasMaxLength(128);
+            entity.Property(e => e.ResourceDeltas).HasColumnType("jsonb");
+            entity.Property(e => e.Metadata).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.PlayerId, e.OccurredAtUtc });
+            entity.HasIndex(e => e.OccurredAtUtc);
         });
 
         builder.Entity<RecipeEntity>(entity =>

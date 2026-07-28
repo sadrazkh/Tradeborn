@@ -56,6 +56,12 @@ public sealed class CityBuildingEntity
     public string State { get; set; } = string.Empty;
     public string HaltReason { get; set; } = string.Empty;
     public long ProgressMilliseconds { get; set; }
+
+    /// <summary>When an in-flight build or upgrade finishes. Null when nothing is in flight.</summary>
+    public DateTimeOffset? CompletesAtUtc { get; set; }
+
+    /// <summary>Level once the in-flight work lands. Equal to <see cref="Level"/> when idle.</summary>
+    public int PendingLevel { get; set; }
 }
 
 public sealed class CityInventoryEntity
@@ -95,6 +101,21 @@ public sealed class BuildingDefinitionEntity
     public long BuildSeconds { get; set; }
     public int UnlockCityLevel { get; set; }
     public bool PrePlaced { get; set; }
+
+    /// <summary>The Town Hall. Its level caps city level, so breadth alone cannot unlock tiers.</summary>
+    public bool IsCityCentre { get; set; }
+
+    /// <summary>Materials required in addition to coins. Empty for buildings that cost only money.</summary>
+    public List<BuildingCostEntity> Costs { get; set; } = [];
+}
+
+/// <summary>A material component of a building's level-1 build cost.</summary>
+public sealed class BuildingCostEntity
+{
+    public int Id { get; set; }
+    public string BuildingId { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public long Quantity { get; set; }
 }
 
 public sealed class RecipeEntity
@@ -117,6 +138,58 @@ public sealed class RecipeIngredientEntity
 
     /// <summary>False for inputs, true for outputs.</summary>
     public bool IsOutput { get; set; }
+}
+
+/// <summary>
+/// A recorded command response, keyed by the client's Idempotency-Key.
+/// </summary>
+/// <remarks>
+/// Written inside the same transaction as the command it describes (SECURITY_MODEL.md T3).
+/// That is what makes a crash between "apply" and "record" impossible: either both land or
+/// neither does. A retried request returns the stored response without re-executing, so a
+/// flaky network can never charge a player twice.
+/// </remarks>
+public sealed class IdempotencyKeyEntity
+{
+    public Guid PlayerId { get; set; }
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>Distinguishes the same key replayed against a different command.</summary>
+    public string Operation { get; set; } = string.Empty;
+
+    public int StatusCode { get; set; }
+    public string ResponseBody { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+/// <summary>
+/// Append-only record of every economic mutation.
+/// </summary>
+/// <remarks>
+/// This is what lets Tradeborn reconstruct and audit balances without event sourcing
+/// (ADR-004). <see cref="BalanceAfterCent"/> makes reconciliation cheap: a test sums the
+/// deltas and asserts they equal the stored balance, catching any mutation that bypassed
+/// the ledger.
+/// </remarks>
+public sealed class AuditLedgerEntity
+{
+    public long Id { get; set; }
+    public Guid PlayerId { get; set; }
+    public Guid CityId { get; set; }
+    public DateTimeOffset OccurredAtUtc { get; set; }
+
+    /// <summary>e.g. <c>construction.started</c>, <c>upgrade.started</c>.</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    public long MoneyDeltaCent { get; set; }
+    public long BalanceAfterCent { get; set; }
+
+    /// <summary>Resource deltas as JSON; negative values are spends.</summary>
+    public string ResourceDeltas { get; set; } = "{}";
+
+    public string? CorrelationId { get; set; }
+    public string? IdempotencyKey { get; set; }
+    public string Metadata { get; set; } = "{}";
 }
 
 public sealed class RefreshTokenEntity

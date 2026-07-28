@@ -39,16 +39,25 @@ public sealed class GameCatalogSeeder(TradebornDbContext db, ILogger<GameCatalog
         ("bake_bread", 120_000, [("flour", 2), ("planks", 1)], [("bread", 1)]),
     ];
 
-    private static readonly (string Id, string? RecipeId, long Storage, long CostCoins, long BuildSeconds, int Unlock, bool PrePlaced)[] Buildings =
+    private static readonly (
+        string Id,
+        string? RecipeId,
+        long Storage,
+        long CostCoins,
+        (string Resource, long Qty)[] CostMaterials,
+        long BuildSeconds,
+        int Unlock,
+        bool PrePlaced,
+        bool IsCityCentre)[] Buildings =
     [
-        ("town_hall", null, 100, 0, 0, 1, true),
-        ("market", null, 0, 0, 0, 1, true),
-        ("lumber_camp", "extract_wood", 0, 150, 30, 1, false),
-        ("farm", "extract_grain", 0, 150, 30, 1, false),
-        ("warehouse", null, 200, 250, 60, 1, false),
-        ("sawmill", "saw_planks", 0, 400, 120, 2, false),
-        ("mill", "mill_flour", 0, 400, 120, 2, false),
-        ("bakery", "bake_bread", 0, 900, 300, 3, false),
+        ("town_hall",   null,            100, 0,   [],                            0,   1, true,  true),
+        ("market",      null,            0,   0,   [],                            0,   1, true,  false),
+        ("lumber_camp", "extract_wood",  0,   150, [("wood", 20)],                30,  1, false, false),
+        ("farm",        "extract_grain", 0,   150, [("wood", 20)],                30,  1, false, false),
+        ("warehouse",   null,            200, 250, [("wood", 40)],                60,  1, false, false),
+        ("sawmill",     "saw_planks",    0,   400, [("wood", 60)],                120, 2, false, false),
+        ("mill",        "mill_flour",    0,   400, [("wood", 60)],                120, 2, false, false),
+        ("bakery",      "bake_bread",    0,   900, [("wood", 40), ("planks", 30)], 300, 3, false, false),
     ];
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
@@ -131,9 +140,11 @@ public sealed class GameCatalogSeeder(TradebornDbContext db, ILogger<GameCatalog
 
     private async Task SeedBuildingsAsync(CancellationToken cancellationToken)
     {
-        var existing = await db.BuildingDefinitions.ToDictionaryAsync(b => b.Id, cancellationToken);
+        var existing = await db.BuildingDefinitions
+            .Include(b => b.Costs)
+            .ToDictionaryAsync(b => b.Id, cancellationToken);
 
-        foreach (var (id, recipeId, storage, cost, seconds, unlock, prePlaced) in Buildings)
+        foreach (var (id, recipeId, storage, cost, materials, seconds, unlock, prePlaced, isCentre) in Buildings)
         {
             if (!existing.TryGetValue(id, out var entity))
             {
@@ -147,7 +158,41 @@ public sealed class GameCatalogSeeder(TradebornDbContext db, ILogger<GameCatalog
             entity.BuildSeconds = seconds;
             entity.UnlockCityLevel = unlock;
             entity.PrePlaced = prePlaced;
+            entity.IsCityCentre = isCentre;
+
+            UpsertCosts(entity, materials);
         }
+    }
+
+    /// <summary>
+    /// Upserts material costs by resource, and removes any that the design no longer lists.
+    /// </summary>
+    /// <remarks>
+    /// Removal matters for idempotency: without it, deleting a material from the design above
+    /// would leave the old row behind and every subsequent build would keep charging for it.
+    /// </remarks>
+    private static void UpsertCosts(BuildingDefinitionEntity building, (string Resource, long Qty)[] materials)
+    {
+        foreach (var (resource, quantity) in materials)
+        {
+            var existing = building.Costs.FirstOrDefault(c => c.ResourceId == resource);
+            if (existing is null)
+            {
+                building.Costs.Add(new BuildingCostEntity
+                {
+                    BuildingId = building.Id,
+                    ResourceId = resource,
+                    Quantity = quantity,
+                });
+            }
+            else
+            {
+                existing.Quantity = quantity;
+            }
+        }
+
+        var keep = materials.Select(m => m.Resource).ToHashSet(StringComparer.Ordinal);
+        building.Costs.RemoveAll(c => !keep.Contains(c.ResourceId));
     }
 
     /// <summary>

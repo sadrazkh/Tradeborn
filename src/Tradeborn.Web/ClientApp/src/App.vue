@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { GameBridge } from '@/game/GameBridge'
-import { fetchCity, tryRefresh } from '@/api/client'
+import { fetchCity, newIdempotencyKey, startConstruction, tryRefresh } from '@/api/client'
 import type { PerfSample, RendererBackend, ResourceBalanceDto, SelectionInfo } from '@/game/types'
 import DebugOverlay from '@/ui/DebugOverlay.vue'
 import SelectionCard from '@/ui/SelectionCard.vue'
+import BuildBar from '@/ui/BuildBar.vue'
+import ToastStack from '@/ui/ToastStack.vue'
+import type { BuildOption, Toast } from '@/ui/uiTypes'
 import AuthScreen from '@/ui/AuthScreen.vue'
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -27,6 +30,26 @@ const perf = ref<PerfSample>({ fps: 0, drawCalls: 0, triangles: 0, meshes: 0 })
 const p95 = ref(0)
 const timeOfDay = ref(0.36)
 const showDebug = ref(__TRADEBORN_DEBUG__)
+const cityLevel = ref(1)
+const placing = ref(false)
+const commandBusy = ref(false)
+const toasts = ref<Toast[]>([])
+let toastId = 0
+
+/**
+ * Costs shown in the build menu mirror the seed data.
+ *
+ * The server remains the authority — it recomputes every cost and can refuse — so these are
+ * an affordance that stops the player guessing, not a source of truth (SECURITY_MODEL.md §3).
+ */
+const buildOptions: BuildOption[] = [
+  { definitionId: 'lumber_camp', label: 'Lumber Camp', costCoins: 150, costWood: 20, unlockCityLevel: 1 },
+  { definitionId: 'farm', label: 'Farm', costCoins: 150, costWood: 20, unlockCityLevel: 1 },
+  { definitionId: 'warehouse', label: 'Warehouse', costCoins: 250, costWood: 40, unlockCityLevel: 1 },
+  { definitionId: 'sawmill', label: 'Sawmill', costCoins: 400, costWood: 60, unlockCityLevel: 2 },
+  { definitionId: 'mill', label: 'Mill', costCoins: 400, costWood: 60, unlockCityLevel: 2 },
+  { definitionId: 'bakery', label: 'Bakery', costCoins: 900, costWood: 40, unlockCityLevel: 3 },
+]
 
 let unsubscribeSelection: (() => void) | null = null
 let perfTimer: number | null = null
@@ -109,6 +132,66 @@ function onTimeOfDayChanged(value: number) {
 function reload() {
   window.location.reload()
 }
+
+function woodHeld(): number {
+  return resources.value.find((r) => r.resource === 'wood')?.quantity ?? 0
+}
+
+function toast(text: string, tone: 'ok' | 'warn' = 'ok') {
+  const id = ++toastId
+  toasts.value = [...toasts.value, { id, text, tone }]
+  window.setTimeout(() => {
+    toasts.value = toasts.value.filter((t) => t.id !== id)
+  }, 4000)
+}
+
+/** Enters placement mode. The build only happens once the player confirms a plot. */
+function beginPlacement(definitionId: string) {
+  placing.value = true
+  bridge.value?.beginPlacement(definitionId, (candidate) => {
+    placing.value = false
+    void confirmBuild(definitionId, candidate.col, candidate.row)
+  })
+}
+
+function cancelPlacement() {
+  placing.value = false
+  bridge.value?.cancelPlacement()
+}
+
+/**
+ * Sends the build and reconciles against the server's answer.
+ *
+ * The idempotency key is generated once per attempt, so a retry of this same build can never
+ * charge twice. A refusal is not an error — it is the world explaining itself, so it is shown
+ * as a message rather than thrown.
+ */
+async function confirmBuild(definitionId: string, col: number, row: number) {
+  if (commandBusy.value) return
+  commandBusy.value = true
+
+  try {
+    const result = await startConstruction(definitionId, col, row, newIdempotencyKey())
+
+    if (!result.accepted) {
+      toast(result.refusalMessage ?? 'That build was refused.', 'warn')
+      return
+    }
+
+    // Reconcile from the server's numbers rather than guessing locally.
+    balanceCoins.value = result.balanceCoins
+    resources.value = result.resources
+    if (result.building) {
+      bridge.value?.addBuilding(result.building)
+      toast('Construction started.')
+    }
+  } catch (error) {
+    console.error('[Tradeborn] Build failed', error)
+    toast('Could not reach the server. Nothing was charged.', 'warn')
+  } finally {
+    commandBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -161,8 +244,21 @@ function reload() {
 
     <SelectionCard :selection="selection" />
 
+    <BuildBar
+      :options="buildOptions"
+      :balance-coins="balanceCoins"
+      :wood="woodHeld()"
+      :city-level="cityLevel"
+      :placing="placing"
+      :busy="commandBusy"
+      @pick="beginPlacement"
+      @cancel="cancelPlacement"
+    />
+
+    <ToastStack :toasts="toasts" />
+
     <div class="hint-bar tb-panel">
-      Drag to orbit · Scroll to zoom · Click a building or plot
+      {{ placing ? 'Tap a highlighted plot to build · Esc to cancel' : 'Drag to orbit · Scroll to zoom · Click a building or plot' }}
     </div>
   </div>
 </template>

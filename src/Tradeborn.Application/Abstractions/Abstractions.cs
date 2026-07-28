@@ -35,13 +35,77 @@ public interface ICityStore
     /// <summary>Loads a city with its buildings, inventory and plots. Null if the player has none.</summary>
     Task<CityAggregate?> LoadAsync(Guid playerId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Loads a city while holding a row lock on it for the rest of the transaction.
+    /// </summary>
+    /// <remarks>
+    /// <c>SELECT … FOR UPDATE</c>. Every economic command takes this lock, which serialises
+    /// commands for one city and is what makes the double-spend test (SECURITY_MODEL.md T4)
+    /// pass. Contention is naturally near zero — one player per city — so this costs nothing
+    /// in practice while removing an entire class of race condition.
+    /// </remarks>
+    Task<CityAggregate?> LoadForUpdateAsync(Guid playerId, CancellationToken cancellationToken = default);
+
     Task SaveAsync(CityAggregate aggregate, CancellationToken cancellationToken = default);
 }
 
-/// <summary>A loaded city plus the plot layout, which is presentation state rather than economy state.</summary>
-public sealed record CityAggregate(City City, string Name, int GridSize, IReadOnlyList<PlotState> Plots);
+/// <summary>A loaded city plus display metadata. Plots live on the <see cref="City"/> itself,
+/// because placement validity is a domain rule rather than a presentation concern.</summary>
+public sealed record CityAggregate(Guid Id, City City, string Name, int GridSize);
 
-public sealed record PlotState(int Col, int Row, string Terrain, bool Unlocked);
+/// <summary>
+/// Transaction boundary for economic commands.
+/// </summary>
+/// <remarks>
+/// Every write in ARCHITECTURE.md §6 runs inside one of these: lock, settle, validate, apply,
+/// audit, record idempotency, commit. There is deliberately no second way to change a balance.
+/// </remarks>
+public interface IUnitOfWork
+{
+    Task<IAsyncDisposable> BeginTransactionAsync(CancellationToken cancellationToken = default);
+    Task CommitAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Stores command responses by Idempotency-Key so a retry replays instead of re-executing.
+/// </summary>
+public interface IIdempotencyStore
+{
+    /// <summary>The stored response for this key, or null if this is the first attempt.</summary>
+    Task<string?> TryGetResponseAsync(
+        Guid playerId, string key, string operation, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records the response. Must run inside the command's own transaction.
+    /// </summary>
+    /// <returns>
+    /// False if the key was already recorded — meaning a concurrent duplicate won the race and
+    /// this attempt must be rolled back rather than applied a second time.
+    /// </returns>
+    Task<bool> TryRecordAsync(
+        Guid playerId,
+        string key,
+        string operation,
+        string responseBody,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>Append-only record of economic mutations (ADR-004).</summary>
+public interface IAuditLog
+{
+    Task AppendAsync(AuditEntry entry, CancellationToken cancellationToken = default);
+}
+
+public sealed record AuditEntry(
+    Guid PlayerId,
+    Guid CityId,
+    string Kind,
+    long MoneyDeltaCent,
+    long BalanceAfterCent,
+    IReadOnlyDictionary<string, long> ResourceDeltas,
+    string? CorrelationId,
+    string? IdempotencyKey,
+    IReadOnlyDictionary<string, string>? Metadata = null);
 
 /// <summary>
 /// Cache abstraction. Backed by Redis in production; an in-memory implementation is used when

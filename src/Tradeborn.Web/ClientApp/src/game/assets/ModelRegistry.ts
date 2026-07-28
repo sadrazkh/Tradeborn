@@ -24,10 +24,23 @@ export interface ModelRegistry {
   create(definitionId: string, level: number): BuiltModel
 }
 
+/**
+ * A part that turns while the building is producing.
+ *
+ * The axis is per-part rather than a global convention: a saw blade turns about its mounting
+ * axis while a windmill's sails turn in the plane facing the viewer. Rotating both about Y
+ * would spin the sails like a carousel.
+ */
+export interface Spinner {
+  node: TransformNode
+  axis: 'x' | 'y' | 'z'
+  /** Radians per second. Heavier machinery turns more slowly. */
+  speed: number
+}
+
 export interface BuiltModel {
   root: TransformNode
-  /** Nodes spun by the AnimationCoordinator when the building is producing. */
-  spinners: TransformNode[]
+  spinners: Spinner[]
   /** Approximate height, used to anchor UI and effects above the building. */
   height: number
 }
@@ -42,7 +55,7 @@ export class ProceduralModelRegistry implements ModelRegistry {
 
   create(definitionId: string, level: number): BuiltModel {
     const root = new TransformNode(`bld_${definitionId}_${this.counter++}`, this.scene)
-    const spinners: TransformNode[] = []
+    const spinners: Spinner[] = []
 
     // Level scaling is subtle in footprint but obvious in height and detail, so an
     // upgrade reads from across the city (ART_DIRECTION.md §5).
@@ -64,6 +77,15 @@ export class ProceduralModelRegistry implements ModelRegistry {
         break
       case 'sawmill':
         height = this.sawmill(root, s, spinners)
+        break
+      case 'farm':
+        height = this.farm(root, s)
+        break
+      case 'mill':
+        height = this.mill(root, s, spinners)
+        break
+      case 'bakery':
+        height = this.bakery(root, s)
         break
       default:
         height = this.placeholder(root, s)
@@ -290,7 +312,7 @@ export class ProceduralModelRegistry implements ModelRegistry {
   }
 
   /** Silhouette cue: the rotating saw blade — the only building with a large disc. */
-  private sawmill(root: TransformNode, s: number, spinners: TransformNode[]): number {
+  private sawmill(root: TransformNode, s: number, spinners: Spinner[]): number {
     this.box(root, 'stone', { w: 3.0 * s, h: 0.26, d: 2.6 * s }, { y: 0.13 })
     this.box(root, 'timber', { w: 2.2 * s, h: 1.4 * s, d: 2.0 * s }, { x: -0.3 * s, y: 0.96 * s })
     this.gableRoof(root, 'roofSlate', 2.4 * s, 2.2 * s, 1.64 * s)
@@ -323,7 +345,7 @@ export class ProceduralModelRegistry implements ModelRegistry {
         { rotY: -angle },
       )
     }
-    spinners.push(pivot)
+    spinners.push({ node: pivot, axis: 'y', speed: 4.5 })
 
     // Support frame for the blade
     this.box(root, 'timberDark', { w: 0.18 * s, h: 1.1 * s, d: 0.18 * s }, { x: 1.05 * s, y: 0.55 * s, z: 0.55 * s })
@@ -334,6 +356,117 @@ export class ProceduralModelRegistry implements ModelRegistry {
       this.box(root, 'timber', { w: 1.0 * s, h: 0.1 * s, d: 0.6 * s }, { x: 0.6 * s, y: (0.31 + i * 0.11) * s, z: -1.0 * s })
     }
     return 2.9 * s
+  }
+
+  /** Silhouette cue: the only building surrounded by flat striped field rows. */
+  private farm(root: TransformNode, s: number): number {
+    this.box(root, 'dirt', { w: 3.2 * s, h: 0.2, d: 3.0 * s }, { y: 0.1 })
+
+    // Barn pushed to one corner so the field reads as the dominant feature.
+    this.box(root, 'roofRed', { w: 1.6 * s, h: 1.2 * s, d: 1.3 * s }, { x: -0.75 * s, z: -0.75 * s, y: 0.8 * s })
+    this.gableRoof(root, 'roofSlate', 1.8 * s, 1.5 * s, 1.4 * s)
+    this.box(
+      root,
+      'windowGlow',
+      { w: 0.28 * s, h: 0.3 * s, d: 0.08 },
+      { x: -0.75 * s, y: 0.9 * s, z: -0.1 * s },
+      { emissive: true },
+    )
+
+    // Crop rows — alternating tones make the field legible from the isometric angle.
+    for (let i = 0; i < 5; i++) {
+      this.box(
+        root,
+        i % 2 === 0 ? 'grassLight' : 'grassDark',
+        { w: 1.7 * s, h: 0.14, d: 0.32 * s },
+        { x: 0.65 * s, y: 0.24, z: (-0.7 + i * 0.36) * s },
+      )
+    }
+
+    // Fence posts along the field edge
+    for (let i = 0; i < 4; i++) {
+      this.box(root, 'timberDark', { w: 0.1 * s, h: 0.5 * s, d: 0.1 * s }, { x: 1.45 * s, y: 0.35 * s, z: (-0.8 + i * 0.55) * s })
+    }
+
+    return 2.2 * s
+  }
+
+  /** Silhouette cue: by far the tallest and thinnest, crowned by turning sails. */
+  private mill(root: TransformNode, s: number, spinners: Spinner[]): number {
+    this.box(root, 'stone', { w: 2.4 * s, h: 0.3, d: 2.4 * s }, { y: 0.15 })
+
+    // Tapered tower — three stacked sections read as a taper without a cone mesh.
+    this.cyl(root, 'plaster', { h: 1.4 * s, dTop: 1.5 * s, dBottom: 1.8 * s, sides: 10 }, { y: 1.0 * s })
+    this.cyl(root, 'plaster', { h: 1.2 * s, dTop: 1.2 * s, dBottom: 1.5 * s, sides: 10 }, { y: 2.3 * s })
+    this.cyl(root, 'roofSlate', { h: 0.7 * s, dTop: 0.3 * s, dBottom: 1.35 * s, sides: 10 }, { y: 3.25 * s })
+
+    this.box(
+      root,
+      'windowGlow',
+      { w: 0.3 * s, h: 0.34 * s, d: 0.1 },
+      { y: 1.2 * s, z: 0.85 * s },
+      { emissive: true },
+    )
+    this.box(root, 'timberDark', { w: 0.55 * s, h: 0.85 * s, d: 0.1 }, { y: 0.72 * s, z: 0.88 * s })
+
+    // Sails on a pivot facing the camera's default quarter view.
+    const pivot = new TransformNode(`${root.name}_sailPivot`, this.scene)
+    pivot.parent = root
+    pivot.position.set(0, 2.6 * s, 1.0 * s)
+
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2
+      const arm = new TransformNode(`${root.name}_sail${i}`, this.scene)
+      arm.parent = pivot
+      arm.rotation.z = angle
+
+      this.box(arm, 'timberDark', { w: 0.14 * s, h: 1.7 * s, d: 0.1 }, { y: 0.85 * s })
+      this.box(arm, 'plaster', { w: 0.42 * s, h: 1.1 * s, d: 0.06 }, { x: 0.2 * s, y: 1.0 * s })
+    }
+    spinners.push({ node: pivot, axis: 'z', speed: 0.9 })
+
+    // Flour sacks at the base
+    for (let i = 0; i < 3; i++) {
+      this.box(root, 'plaster', { w: 0.4 * s, h: 0.42 * s, d: 0.4 * s }, { x: (-1.0 + i * 0.42) * s, y: 0.51 * s, z: -1.0 * s })
+    }
+
+    return 4.2 * s
+  }
+
+  /** Silhouette cue: a tall wide chimney and a glowing oven mouth at ground level. */
+  private bakery(root: TransformNode, s: number): number {
+    this.box(root, 'stone', { w: 3.0 * s, h: 0.28, d: 2.6 * s }, { y: 0.14 })
+    this.box(root, 'plaster', { w: 2.4 * s, h: 1.4 * s, d: 2.0 * s }, { x: -0.2 * s, y: 0.98 * s })
+    this.box(root, 'timber', { w: 2.44 * s, h: 0.18, d: 2.04 * s }, { x: -0.2 * s, y: 1.72 * s })
+    this.gableRoof(root, 'roofRed', 2.6 * s, 2.2 * s, 1.82 * s)
+
+    // Chimney — the identity cue. Deliberately oversized so it reads at 128 px.
+    this.box(root, 'stone', { w: 0.7 * s, h: 2.4 * s, d: 0.7 * s }, { x: 1.15 * s, y: 1.2 * s, z: -0.5 * s })
+    this.box(root, 'timberDark', { w: 0.85 * s, h: 0.22 * s, d: 0.85 * s }, { x: 1.15 * s, y: 2.45 * s, z: -0.5 * s })
+
+    // Oven mouth glowing at ground level — reads as "this building is working".
+    this.box(
+      root,
+      'warning',
+      { w: 0.62 * s, h: 0.5 * s, d: 0.1 },
+      { x: 1.15 * s, y: 0.45 * s, z: -0.08 * s },
+      { emissive: true },
+    )
+
+    // Shop window and awning
+    this.box(
+      root,
+      'windowGlow',
+      { w: 0.9 * s, h: 0.5 * s, d: 0.08 },
+      { x: -0.35 * s, y: 1.05 * s, z: 1.01 * s },
+      { emissive: true },
+    )
+    this.box(root, 'roofRed', { w: 1.1 * s, h: 0.1, d: 0.5 * s }, { x: -0.35 * s, y: 1.42 * s, z: 1.18 * s })
+
+    // Bread crates by the door
+    this.box(root, 'timber', { w: 0.45 * s, h: 0.3 * s, d: 0.45 * s }, { x: -1.1 * s, y: 0.43 * s, z: 0.9 * s })
+
+    return 3.6 * s
   }
 
   private placeholder(root: TransformNode, s: number): number {

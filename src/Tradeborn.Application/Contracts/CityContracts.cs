@@ -29,7 +29,20 @@ public sealed record BuildingDto(
     int Row,
     int Level,
     string State,
-    string? HaltReason);
+    string? HaltReason,
+    /// <summary>When an in-flight build or upgrade lands. Null when nothing is in flight.</summary>
+    DateTimeOffset? CompletesAtUtc = null,
+    /// <summary>Level once the in-flight work finishes; equal to <see cref="Level"/> when idle.</summary>
+    int PendingLevel = 1,
+    /// <summary>
+    /// Build progress 0..1 at <c>ServerTimeUtc</c>.
+    /// </summary>
+    /// <remarks>
+    /// Sent so the client can pick the right construction stage immediately on load rather
+    /// than replaying from zero. It then interpolates against the synchronised server clock —
+    /// never against <c>Date.now()</c> (REALTIME_AND_TIME_MODEL.md §7).
+    /// </remarks>
+    double ConstructionProgress = 1);
 
 public sealed record ResourceBalanceDto(string Resource, long Quantity, long Capacity);
 

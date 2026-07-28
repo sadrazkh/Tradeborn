@@ -63,18 +63,42 @@ public sealed class Recipe
     /// </remarks>
     public long CycleMillisecondsAtLevel(int level)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(level, 1);
-
-        var factor = Math.Pow(UpgradeCurve.OutputFactor, level - 1);
+        var factor = UpgradeCurve.PowForLevel(UpgradeCurve.OutputFactor, level);
         return Math.Max(1, (long)(CycleMilliseconds / factor));
     }
 }
 
 /// <summary>Upgrade scaling constants from docs/economy/ECONOMY_DESIGN.md §5.</summary>
+/// <remarks>
+/// <c>decimal</c>, not <c>double</c>. These multipliers feed every cost and rate in the game,
+/// and `decimal` represents 1.6 and 2.5 exactly where binary floating point does not. The
+/// architecture tests reject floating point anywhere in the economy domain for this reason.
+/// </remarks>
 public static class UpgradeCurve
 {
-    public const double OutputFactor = 1.6;
-    public const double CostFactor = 2.5;
-    public const double TimeFactor = 3.0;
+    public const decimal OutputFactor = 1.6m;
+    public const decimal CostFactor = 2.5m;
+    public const decimal TimeFactor = 3.0m;
     public const int MaxLevel = 3;
+
+    /// <summary>
+    /// <paramref name="factor"/> raised to <c>level - 1</c>, by exact repeated multiplication.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="Math.Pow"/>: that returns a <see cref="double"/> and would
+    /// reintroduce binary rounding into every cost in the game. Levels are capped at 3, so a
+    /// loop is both exact and cheaper than a transcendental call.
+    /// </remarks>
+    public static decimal PowForLevel(decimal factor, int level)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(level, 1);
+
+        var result = 1m;
+        for (var i = 1; i < level; i++)
+        {
+            result *= factor;
+        }
+
+        return result;
+    }
 }

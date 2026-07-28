@@ -1,4 +1,5 @@
 using Tradeborn.Domain.Buildings;
+using Tradeborn.Domain.Common;
 using Tradeborn.Domain.Cities;
 using Tradeborn.Domain.Economy;
 using Tradeborn.Domain.Production;
@@ -38,14 +39,52 @@ internal static class SliceEconomy
         [ResourceAmount.Of("flour", 2), ResourceAmount.Of("planks", 1)],
         [ResourceAmount.Of("bread", 1)], topologicalRank: 2);
 
-    public static BuildingDefinition LumberCamp { get; } = new("lumber_camp", ExtractWood);
-    public static BuildingDefinition Farm { get; } = new("farm", ExtractGrain);
-    public static BuildingDefinition Sawmill { get; } = new("sawmill", SawPlanks);
-    public static BuildingDefinition Mill { get; } = new("mill", MillFlour);
-    public static BuildingDefinition Bakery { get; } = new("bakery", BakeBread);
+    // Costs and durations mirror docs/economy/ECONOMY_DESIGN.md §4, matching what the
+    // seeder writes to the database.
+    public static BuildingDefinition LumberCamp { get; } = new(
+        "lumber_camp", ExtractWood,
+        buildCostCoins: Money.FromCoins(150),
+        buildCostResources: [ResourceAmount.Of("wood", 20)],
+        buildMilliseconds: 30_000);
 
-    public static BuildingDefinition TownHall { get; } = new("town_hall", recipe: null, storagePerResource: 100);
-    public static BuildingDefinition Warehouse { get; } = new("warehouse", recipe: null, storagePerResource: 200);
+    public static BuildingDefinition Farm { get; } = new(
+        "farm", ExtractGrain,
+        buildCostCoins: Money.FromCoins(150),
+        buildCostResources: [ResourceAmount.Of("wood", 20)],
+        buildMilliseconds: 30_000);
+
+    public static BuildingDefinition Sawmill { get; } = new(
+        "sawmill", SawPlanks,
+        buildCostCoins: Money.FromCoins(400),
+        buildCostResources: [ResourceAmount.Of("wood", 60)],
+        buildMilliseconds: 120_000,
+        unlockCityLevel: 2);
+
+    public static BuildingDefinition Mill { get; } = new(
+        "mill", MillFlour,
+        buildCostCoins: Money.FromCoins(400),
+        buildCostResources: [ResourceAmount.Of("wood", 60)],
+        buildMilliseconds: 120_000,
+        unlockCityLevel: 2);
+
+    public static BuildingDefinition Bakery { get; } = new(
+        "bakery", BakeBread,
+        buildCostCoins: Money.FromCoins(900),
+        buildCostResources: [ResourceAmount.Of("wood", 40), ResourceAmount.Of("planks", 30)],
+        buildMilliseconds: 300_000,
+        unlockCityLevel: 3);
+
+    public static BuildingDefinition TownHall { get; } = new(
+        "town_hall", recipe: null, storagePerResource: 100, prePlaced: true, isCityCentre: true);
+
+    public static BuildingDefinition Market { get; } = new(
+        "market", recipe: null, prePlaced: true);
+
+    public static BuildingDefinition Warehouse { get; } = new(
+        "warehouse", recipe: null, storagePerResource: 200,
+        buildCostCoins: Money.FromCoins(250),
+        buildCostResources: [ResourceAmount.Of("wood", 40)],
+        buildMilliseconds: 60_000);
 
     /// <summary>Effectively unlimited storage, so capacity never accidentally binds in a test.</summary>
     private const long UnlimitedCapacity = 1_000_000;
@@ -68,6 +107,7 @@ internal static class SliceEconomy
         params (BuildingDefinition Definition, int Level)[] definitions)
     {
         var city = new City("city-1", Epoch);
+        city.SetPlots(DefaultPlots());
 
         var store = new BuildingDefinition("test_store", recipe: null, storagePerResource: capacityPerResource);
         city.Add(new BuildingInstance("store", store, 0, 0, level: 1));
@@ -79,6 +119,37 @@ internal static class SliceEconomy
             city.Add(new BuildingInstance($"b{index}-{definition.Id}", definition, index, 1, level));
         }
 
+        return city;
+    }
+
+    /// <summary>An 8x8 grid with the middle 4x4 unlocked, mirroring a freshly provisioned city.</summary>
+    public static IEnumerable<CityPlot> DefaultPlots()
+    {
+        for (var row = 0; row < 8; row++)
+        {
+            for (var col = 0; col < 8; col++)
+            {
+                var unlocked = col is >= 1 and <= 4 && row is >= 2 and <= 5;
+                yield return new CityPlot(col, row, "grass", unlocked);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A city as a new player finds it: Town Hall and Market pre-placed, 800 coins, 80 wood.
+    /// </summary>
+    /// <remarks>
+    /// Matches the starting state in ECONOMY_DESIGN.md §10, so tests that assert what a new
+    /// player can afford stay honest about the real opening position.
+    /// </remarks>
+    public static City NewPlayerCity()
+    {
+        var city = new City("city-new", Epoch);
+        city.SetPlots(DefaultPlots());
+        city.Add(new BuildingInstance("town-hall", TownHall, 2, 3));
+        city.Add(new BuildingInstance("market", Market, 4, 5));
+        city.Credit(Money.FromCoins(800));
+        city.Inventory.Add(ResourceId.From("wood"), 80);
         return city;
     }
 }

@@ -12,11 +12,29 @@ namespace Tradeborn.Infrastructure.Persistence;
 /// </summary>
 public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICityStore
 {
-    public async Task<CityAggregate?> LoadAsync(Guid playerId, CancellationToken cancellationToken = default)
+    public Task<CityAggregate?> LoadAsync(Guid playerId, CancellationToken cancellationToken = default) =>
+        LoadCoreAsync(playerId, cancellationToken);
+
+    public async Task<CityAggregate?> LoadForUpdateAsync(
+        Guid playerId,
+        CancellationToken cancellationToken = default)
     {
-        // A single round trip with split queries: one JOIN across buildings, inventory and
-        // plots would multiply rows together. Verified by the query-count assertion in
-        // TEST_STRATEGY.md §3 rather than by inspection.
+        // Takes the row lock before reading anything else, so two concurrent commands for the
+        // same city serialise here rather than racing through validation with the same
+        // balance (SECURITY_MODEL.md T4). Identifiers are quoted because the schema uses
+        // PascalCase columns; the parameter is still bound, never interpolated into SQL.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""SELECT 1 FROM cities WHERE "PlayerId" = {playerId} FOR UPDATE""",
+            cancellationToken);
+
+        return await LoadCoreAsync(playerId, cancellationToken);
+    }
+
+    private async Task<CityAggregate?> LoadCoreAsync(Guid playerId, CancellationToken cancellationToken)
+    {
+        // Split queries: one JOIN across buildings, inventory and plots would multiply rows
+        // together. Verified by the query-count assertion in TEST_STRATEGY.md §3 rather than
+        // by inspection.
         var entity = await db.Cities
             .AsSplitQuery()
             .Include(c => c.Buildings)
@@ -31,6 +49,10 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
 
         var city = new City(entity.Id.ToString(), entity.LastSettledAtUtc);
         city.Credit(Money.FromCent(entity.BalanceCent));
+
+        city.SetPlots(entity.Plots
+            .OrderBy(p => p.Row).ThenBy(p => p.Col)
+            .Select(p => new CityPlot(p.Col, p.Row, p.Terrain, p.Unlocked)));
 
         foreach (var building in entity.Buildings.OrderBy(b => b.Id))
         {
@@ -50,7 +72,9 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
                 building.Level,
                 Enum.Parse<BuildingState>(building.State),
                 Enum.Parse<HaltReason>(building.HaltReason),
-                building.ProgressMilliseconds));
+                building.ProgressMilliseconds,
+                building.CompletesAtUtc,
+                building.PendingLevel == 0 ? building.Level : building.PendingLevel));
         }
 
         // Capacity is derived from the buildings just added, so inventory must be restored
@@ -62,17 +86,12 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
             city.Inventory.Set(ResourceId.From(item.ResourceId), item.Quantity);
         }
 
-        var plots = entity.Plots
-            .OrderBy(p => p.Row).ThenBy(p => p.Col)
-            .Select(p => new PlotState(p.Col, p.Row, p.Terrain, p.Unlocked))
-            .ToArray();
-
-        return new CityAggregate(city, entity.Name, entity.GridSize, plots);
+        return new CityAggregate(entity.Id, city, entity.Name, entity.GridSize);
     }
 
     public async Task SaveAsync(CityAggregate aggregate, CancellationToken cancellationToken = default)
     {
-        var cityId = Guid.Parse(aggregate.City.Id);
+        var cityId = aggregate.Id;
 
         var entity = await db.Cities
             .Include(c => c.Buildings)
@@ -83,26 +102,58 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
         entity.BalanceCent = aggregate.City.Balance.Cent;
         entity.LastSettledAtUtc = aggregate.City.LastSettledAt;
 
-        var buildingsById = entity.Buildings.ToDictionary(b => b.Id.ToString());
+        SaveBuildings(entity, aggregate, cityId);
+        SaveInventory(entity, aggregate, cityId);
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void SaveBuildings(CityEntity entity, CityAggregate aggregate, Guid cityId)
+    {
+        var stored = entity.Buildings.ToDictionary(b => b.Id.ToString());
+
         foreach (var building in aggregate.City.Buildings)
         {
-            if (!buildingsById.TryGetValue(building.Id, out var stored))
+            if (stored.TryGetValue(building.Id, out var row))
             {
+                row.Level = building.Level;
+                row.State = building.State.ToString();
+                row.HaltReason = building.HaltReason.ToString();
+                row.ProgressMilliseconds = building.ProgressMilliseconds;
+                row.CompletesAtUtc = building.CompletesAtUtc;
+                row.PendingLevel = building.PendingLevel;
                 continue;
             }
 
-            stored.Level = building.Level;
-            stored.State = building.State.ToString();
-            stored.HaltReason = building.HaltReason.ToString();
-            stored.ProgressMilliseconds = building.ProgressMilliseconds;
+            // A newly placed building. Inserting it here — inside the command's transaction,
+            // while the city row is locked — is what makes the unique index on
+            // (CityId, Col, Row) the final backstop against two builds on one plot.
+            entity.Buildings.Add(new CityBuildingEntity
+            {
+                Id = Guid.Parse(building.Id),
+                CityId = cityId,
+                DefinitionId = building.Definition.Id,
+                Col = building.Col,
+                Row = building.Row,
+                Level = building.Level,
+                State = building.State.ToString(),
+                HaltReason = building.HaltReason.ToString(),
+                ProgressMilliseconds = building.ProgressMilliseconds,
+                CompletesAtUtc = building.CompletesAtUtc,
+                PendingLevel = building.PendingLevel,
+            });
         }
+    }
 
-        var inventoryByResource = entity.Inventory.ToDictionary(i => i.ResourceId, StringComparer.Ordinal);
+    private static void SaveInventory(CityEntity entity, CityAggregate aggregate, Guid cityId)
+    {
+        var byResource = entity.Inventory.ToDictionary(i => i.ResourceId, StringComparer.Ordinal);
+
         foreach (var (resource, quantity) in aggregate.City.Inventory.Snapshot())
         {
-            if (inventoryByResource.TryGetValue(resource.Value, out var stored))
+            if (byResource.TryGetValue(resource.Value, out var row))
             {
-                stored.Quantity = quantity;
+                row.Quantity = quantity;
             }
             else
             {
@@ -114,7 +165,5 @@ public sealed class CityStore(TradebornDbContext db, IGameCatalog catalog) : ICi
                 });
             }
         }
-
-        await db.SaveChangesAsync(cancellationToken);
     }
 }

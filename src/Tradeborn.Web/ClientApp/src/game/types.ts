@@ -23,6 +23,19 @@ export interface BuildingDto {
   row: number
   level: number
   state: BuildingState
+  haltReason?: string | null
+  /** ISO instant when in-flight work lands. Null when nothing is in flight. */
+  completesAtUtc?: string | null
+  /** Level once the in-flight work finishes; equal to `level` when idle. */
+  pendingLevel?: number
+  /**
+   * Build progress 0..1 at the response's `serverTimeUtc`.
+   *
+   * Sent so the renderer can jump straight to the correct construction stage on load rather
+   * than replaying from zero. It is then interpolated against the synchronised server clock,
+   * never against `Date.now()` (REALTIME_AND_TIME_MODEL.md §7).
+   */
+  constructionProgress?: number
 }
 
 export interface ResourceBalanceDto {

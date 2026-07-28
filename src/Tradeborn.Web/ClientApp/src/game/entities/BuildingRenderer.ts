@@ -7,17 +7,19 @@ import type { Scene } from '@babylonjs/core/scene'
 import '@babylonjs/core/Meshes/Builders/boxBuilder'
 
 import type { MaterialLibrary } from '../assets/MaterialLibrary'
-import type { ModelRegistry } from '../assets/ModelRegistry'
+import type { ModelRegistry, Spinner } from '../assets/ModelRegistry'
 import type { PlotGrid } from '../world/PlotGrid'
+import { ConstructionVisual } from './ConstructionVisual'
 import type { BuildingDto } from '../types'
 
 interface PlacedBuilding {
   dto: BuildingDto
   root: TransformNode
-  spinners: TransformNode[]
+  spinners: Spinner[]
   height: number
   picker: Mesh
   halted: Mesh | null
+  construction: ConstructionVisual | null
 }
 
 /**
@@ -59,8 +61,16 @@ export class BuildingRenderer {
     picker.isPickable = true
     picker.metadata = { kind: 'building', buildingId: dto.id, col: dto.col, row: dto.row }
 
-    const entry: PlacedBuilding = { dto, root, spinners, height, picker, halted: null }
+    const entry: PlacedBuilding = { dto, root, spinners, height, picker, halted: null, construction: null }
     this.placed.set(dto.id, entry)
+
+    if (dto.state === 'UnderConstruction') {
+      entry.construction = new ConstructionVisual(
+        this.scene, this.materials, root, height, centre.x, centre.z)
+      // Applied immediately so a page load lands on the right stage instead of replaying
+      // the build from zero.
+      entry.construction.update(dto.constructionProgress ?? 0, 0)
+    }
 
     if (dto.state === 'Halted') this.showHaltMote(entry)
   }
@@ -84,14 +94,38 @@ export class BuildingRenderer {
   /**
    * Advances continuous animations. Called once per frame from the render loop.
    *
-   * SCENE_GUIDELINES.md §3: this must not allocate. `rotation.y +=` mutates the existing
+   * `serverNowMs` is the synchronised server clock, never `Date.now()`. Driving construction
+   * from the device clock would let a wrong clock show a finished building that the server
+   * still considers half-built.
+   *
+   * SCENE_GUIDELINES.md §3: this must not allocate. `rotation[axis] +=` mutates the existing
    * Vector3 in place rather than creating a new one.
    */
-  update(deltaSeconds: number, elapsedSeconds: number): void {
+  update(deltaSeconds: number, elapsedSeconds: number, serverNowMs: number): void {
     for (const entry of this.placed.values()) {
+      if (entry.construction) {
+        const completesAt = entry.dto.completesAtUtc
+          ? Date.parse(entry.dto.completesAtUtc)
+          : serverNowMs
+
+        const total = Math.max(1, completesAt - this.startedAt(entry, completesAt))
+        const progress = 1 - (completesAt - serverNowMs) / total
+
+        if (progress >= 1) {
+          entry.construction.complete()
+          entry.construction = null
+          entry.dto = { ...entry.dto, state: 'Producing' }
+        } else {
+          entry.construction.update(progress, deltaSeconds)
+        }
+        continue
+      }
+
       if (entry.dto.state === 'Producing') {
         for (const spinner of entry.spinners) {
-          spinner.rotation.y += deltaSeconds * 4.5
+          // Mutates the existing Vector3 in place — allocating here would create thousands
+          // of objects per second and produce GC stutter (SCENE_GUIDELINES.md §3).
+          spinner.node.rotation[spinner.axis] += deltaSeconds * spinner.speed
         }
       }
       if (entry.halted) {
@@ -101,6 +135,22 @@ export class BuildingRenderer {
       }
     }
   }
+
+  /**
+   * Reconstructs when a build started from the progress the server reported on load.
+   *
+   * The API sends `completesAtUtc` and a progress fraction rather than a start time, because
+   * progress is what the renderer actually needs and it keeps the contract from implying the
+   * client should compute elapsed time itself.
+   */
+  private startedAt(entry: PlacedBuilding, completesAt: number): number {
+    const progress = entry.dto.constructionProgress ?? 0
+    if (progress <= 0 || progress >= 1) return completesAt - 30_000
+    return completesAt - (completesAt - this.loadedAtServerMs) / (1 - progress)
+  }
+
+  /** Server time when this city was loaded, used to anchor construction timelines. */
+  loadedAtServerMs = 0
 
   get(id: string): BuildingDto | undefined {
     return this.placed.get(id)?.dto
@@ -123,6 +173,7 @@ export class BuildingRenderer {
 
   dispose(): void {
     for (const entry of this.placed.values()) {
+      entry.construction?.dispose()
       entry.root.dispose(false, true)
       entry.picker.dispose()
       entry.halted?.dispose()

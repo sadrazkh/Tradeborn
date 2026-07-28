@@ -23,6 +23,20 @@ export interface TradebornTestBridge {
   cameraState(): unknown
   timeOfDay(): number
   setTimeOfDay(value: number): void
+  quality(): string
+  setQuality(preset: 'low' | 'medium' | 'high'): void
+  agents(): { citizens: number; carts: number }
+
+  /**
+   * Placement preview. Exposed here rather than behind a HUD button because confirming a
+   * placement needs the server-side construction command that arrives in Phase 3 — a button
+   * that leads nowhere would be worse than none. This lets Phase 2 demonstrate and test the
+   * system without shipping a dead control.
+   */
+  beginPlacement(definitionId: string): void
+  cancelPlacement(): void
+  isPlacing(): boolean
+  lastCandidate(): { col: number; row: number; valid: boolean; reason: string } | null
 }
 
 declare global {
@@ -32,6 +46,12 @@ declare global {
 }
 
 export function installTestBridge(bridge: GameBridge): void {
+  let lastCandidate: { col: number; row: number; valid: boolean; reason: string } | null = null
+  const unsubscribe = bridge.onPlacementCandidateChanged((candidate) => {
+    lastCandidate = candidate ? { ...candidate } : null
+  })
+  teardown = unsubscribe
+
   window.__tradeborn = {
     ready: () => bridge.isReady,
     renderer: () => bridge.rendererBackend,
@@ -45,9 +65,24 @@ export function installTestBridge(bridge: GameBridge): void {
     cameraState: () => bridge.cameraState,
     timeOfDay: () => bridge.timeOfDay,
     setTimeOfDay: (value: number) => bridge.applyTimeOfDay(value),
+    quality: () => bridge.qualityPreset,
+    setQuality: (preset) => bridge.setQualityPreset(preset),
+    agents: () => bridge.agentCounts,
+
+    beginPlacement: (definitionId: string) => {
+      // No-op confirm: Phase 2 proves the preview, Phase 3 supplies the command.
+      bridge.beginPlacement(definitionId, () => {})
+    },
+    cancelPlacement: () => bridge.cancelPlacement(),
+    isPlacing: () => bridge.isPlacing,
+    lastCandidate: () => lastCandidate,
   }
 }
 
+let teardown: (() => void) | null = null
+
 export function removeTestBridge(): void {
+  teardown?.()
+  teardown = null
   delete window.__tradeborn
 }

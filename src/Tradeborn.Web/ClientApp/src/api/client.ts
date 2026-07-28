@@ -1,10 +1,18 @@
-import type { CityDto } from '@/game/types'
+import type { BuildingDto, CityDto, ResourceBalanceDto } from '@/game/types'
 
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly code?: string,
+    /**
+     * The full response body for a refused command.
+     *
+     * A 409 from an economic command is not an error condition — it is the world saying no,
+     * and it carries the refusal reason plus the player's unchanged balances. Callers unwrap
+     * this instead of treating it as a failure.
+     */
+    readonly refusal?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -32,6 +40,8 @@ interface ProblemDetails {
   title?: string
   detail?: string
   code?: string
+  /** Present when the body is a refused command response rather than problem+json. */
+  refusalMessage?: string
 }
 
 async function request<T>(path: string, init: RequestInit = {}, retryOn401 = true): Promise<T> {
@@ -58,10 +68,16 @@ async function request<T>(path: string, init: RequestInit = {}, retryOn401 = tru
     } catch {
       // Not a problem+json body — fall back to the status text below.
     }
+    // A refused command answers 409 with the command's own response shape rather than a
+    // problem+json document; carry it through so the caller can show the reason.
+    const refusal =
+      response.status === 409 && problem.code === undefined ? problem : undefined
+
     throw new ApiError(
       problem.detail ?? problem.title ?? `Request failed with ${response.status}`,
       response.status,
       problem.code,
+      refusal,
     )
   }
 
@@ -120,4 +136,66 @@ export function fetchCity(signal?: AbortSignal): Promise<CityDto> {
   // No player id in the path: the server resolves the city from the token, which is what
   // makes cross-tenant access structurally impossible (SECURITY_MODEL.md T7).
   return request<CityDto>('/api/cities/me', { signal })
+}
+
+// ---------------------------------------------------------------------------------------
+// Construction
+// ---------------------------------------------------------------------------------------
+
+export interface ConstructionResponse {
+  accepted: boolean
+  refusalCode: string | null
+  refusalMessage: string | null
+  building: BuildingDto | null
+  balanceCoins: number
+  resources: ResourceBalanceDto[]
+  serverTimeUtc: string
+}
+
+/**
+ * Sends *intent* only — which building, which plot.
+ *
+ * There is deliberately no cost, duration or level in this payload: the server computes all
+ * of them (SECURITY_MODEL.md §3). The `Idempotency-Key` is generated per attempt and reused
+ * across retries of that same attempt, so a dropped response can never charge twice.
+ */
+export async function startConstruction(
+  definitionId: string,
+  col: number,
+  row: number,
+  idempotencyKey: string,
+): Promise<ConstructionResponse> {
+  return commandRequest('/api/cities/me/buildings', idempotencyKey, { definitionId, col, row })
+}
+
+export async function startUpgrade(
+  buildingId: string,
+  idempotencyKey: string,
+): Promise<ConstructionResponse> {
+  return commandRequest(`/api/cities/me/buildings/${encodeURIComponent(buildingId)}/upgrade`, idempotencyKey)
+}
+
+async function commandRequest(
+  path: string,
+  idempotencyKey: string,
+  body?: unknown,
+): Promise<ConstructionResponse> {
+  try {
+    return await request<ConstructionResponse>(path, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch (error) {
+    // A refusal comes back as 409 with a full response body. It is a game state to explain,
+    // not an error to report, so it is unwrapped rather than thrown at the caller.
+    if (error instanceof ApiError && error.refusal) {
+      return error.refusal as ConstructionResponse
+    }
+    throw error
+  }
+}
+
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID()
 }

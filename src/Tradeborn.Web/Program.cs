@@ -92,6 +92,7 @@ app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapAuthEndpoints();
 app.MapCityEndpoints();
+app.MapConstructionEndpoints();
 
 app.MapFallbackToFile("index.html").AllowAnonymous();
 

@@ -3,7 +3,7 @@
 > Updated at the end of every phase and whenever work stops. Its purpose is that anyone —
 > including a future session with no memory of this one — can resume in one read.
 
-**Phase:** 0 complete · Phase 1 **code complete, database verification pending**
+**Phase:** 0 complete · Phase 1 code complete (DB verification pending) · Phase 2 **client complete**
 **Branch:** `main` · **Working tree: uncommitted — the user commits.**
 
 ---
@@ -61,6 +61,75 @@ without a database has tested nothing, and hides the very problem it should surf
 | Tests | Unit, Architecture, Integration projects. |
 | CI | GitHub Actions: build, 3 test suites, client typecheck + build, bundle-size gate, gitleaks. |
 
+## Phase 3 — construction & upgrade (code complete)
+
+| Deliverable | State |
+|---|---|
+| Build costs, durations and unlock levels on definitions | ✅ seeded, incl. material costs |
+| Construction state on buildings (`CompletesAtUtc`, `PendingLevel`) | ✅ |
+| `ConstructionRules` — 10 distinct, actionable refusals | ✅ |
+| Completion handled **inside settlement**, not a job | ✅ |
+| `StartConstruction` / `StartUpgrade` commands | ✅ transactional, idempotent, audited |
+| `SELECT … FOR UPDATE` row lock per command | ✅ |
+| Idempotency keys + audit ledger tables | ✅ migration `ConstructionAndAudit` |
+| Endpoints with mandatory `Idempotency-Key` | ✅ |
+| Four-stage construction visuals (scaffolding, crane) | ✅ driven by server progress |
+| Build button + placement → real server command | ✅ |
+| Unit tests | ✅ 50 passing (24 new) |
+| Concurrency / idempotency integration tests | ⚠️ **written but skipped** — need a database |
+
+**Completion lives in settlement, not in a scheduled job.** Finishing a build is a purely
+time-driven state transition, which is exactly what Deterministic Lazy Settlement already
+does. A construction therefore completes correctly whether or not any background worker is
+running — which is precisely what ADR-008 claims jobs should never be needed for. The job
+queue is still the right answer for *notifying* offline players, and that lands with SignalR.
+
+**Two changes the implementation forced:**
+
+- `UpgradeCurve` moved from `double` to `decimal`, with an exact repeated-multiplication
+  helper instead of `Math.Pow`. The architecture test caught a `double` captured into a
+  compiler-generated field and was right to: `decimal` represents 1.6 and 2.5 exactly, binary
+  floating point does not, and these multipliers feed every cost in the game.
+- Plots moved from `CityAggregate` into the domain `City`. Placement validity is a domain
+  rule, not a presentation concern, and it cannot be decided without them.
+
+**Not yet verified:** the 16 integration tests — including the two that matter most,
+`Concurrent_builds_on_one_plot_produce_exactly_one_building` (T4) and
+`Replaying_the_same_idempotency_key_charges_only_once` (T3) — skip without
+`TRADEBORN_TEST_POSTGRES`. They are written and compile; they have never run.
+
+## Phase 2 — the living city (client complete)
+
+Built while the database was being sorted out; none of it depends on the database.
+
+| Deliverable | State |
+|---|---|
+| All 8 slice buildings with distinct silhouettes | ✅ Farm, Mill and Bakery added |
+| Signature moving parts | ✅ Saw blade and windmill sails, each on its own rotation axis |
+| Citizens walking the roads | ✅ 20, instanced, pooled up front |
+| Carts driving the roads | ✅ 6, instanced, pooled up front |
+| Road graph | ✅ `RoadNetwork` derived from dirt plots |
+| Placement preview with valid/invalid | ✅ ghost + pad + glyph (bar vs cross, not colour alone) |
+| Quality presets with auto-downgrade | ✅ Low/Medium/High, drops after 3 s below the p95 floor |
+| Terrain, plot grid, camera, selection, day/night | ✅ (Phase 0/1) |
+| Build button in the HUD | ⬜ **deliberately not built** — see below |
+
+**Why there is no Build button yet.** Confirming a placement needs the server-side
+construction command, which is Phase 3. A button that opens a placement preview and then
+does nothing is worse than no button. The placement system is fully working and driveable
+from `window.__tradeborn.beginPlacement('sawmill')` so it can be demonstrated and tested now,
+and the HUD control lands in Phase 3 alongside the command that makes it real.
+
+**A budget revised by measurement.** `PERFORMANCE_BUDGET.md` originally specified *zero*
+citizens on Low quality. Once instancing was in place, 20 citizens measured at ~2 draw calls
+in total — so removing them buys almost no frame time while costing the strongest "the city
+is alive" cue on exactly the devices that most need it. Low now keeps 6; resolution scale is
+the lever that actually pays on mobile. Document updated with the reasoning.
+
+Notable implementation detail: spinners carry a **per-part rotation axis**. A saw blade turns
+about its mounting axis, a windmill's sails turn in the plane facing the viewer — rotating
+both about Y would have spun the sails like a carousel.
+
 ## 3D bugs reported and fixed this session
 
 You said the 3D view was glitching and jumping. Three causes, all real:
@@ -101,11 +170,17 @@ but **I have not seen the flickering stop.** Please confirm visually.
 
 ## Next actions
 
-1. Set the two user secrets above.
-2. Run the app, confirm the 3D view no longer jumps, and read FPS/draw calls off the debug
-   overlay. This also closes the last open item from Phase 0.
+1. Set the connection-string user secret above.
+2. Run the app and confirm visually:
+   - the 3D view no longer jumps or flickers
+   - citizens and carts are moving along the dirt roads
+   - the 8 buildings are distinguishable from each other
+   - read FPS and draw calls off the debug overlay
 3. Run the integration tests with `TRADEBORN_TEST_POSTGRES` set.
-4. Then Phase 2 — the living city (see [IMPLEMENTATION_PLAN.md](docs/roadmap/IMPLEMENTATION_PLAN.md)).
+4. Try placement preview from the browser console:
+   `__tradeborn.beginPlacement('sawmill')`, move the pointer, then `__tradeborn.lastCandidate()`.
+5. Then Phase 3 — construction and upgrade (see [IMPLEMENTATION_PLAN.md](docs/roadmap/IMPLEMENTATION_PLAN.md)),
+   which also brings the Build button into the HUD.
 
 ## Deferred from Phase 1, deliberately
 
@@ -125,4 +200,5 @@ but **I have not seen the flickering stop.** Please confirm visually.
 | 0 | `8d735b0` | `feat(prototype): validate Babylon scene inside ASP.NET host` |
 | 1 | `09c608e` | `feat(economy): add domain core and deterministic settlement engine` |
 | 1 | `bb415b6` | `docs: record Phase 1 progress and next actions` |
-| 1 | *uncommitted* | 3D fixes, persistence, auth, endpoints, architecture + integration tests, CI |
+| 1 | `8944caf` | `Phase 1 complete: real backend, auth, CI, and docs` |
+| 2 | *uncommitted* | Farm/Mill/Bakery models, citizens, carts, road graph, placement preview, quality presets |

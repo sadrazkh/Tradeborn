@@ -12,10 +12,14 @@ import { MaterialLibrary, PALETTE } from './assets/MaterialLibrary'
 import { ProceduralModelRegistry } from './assets/ModelRegistry'
 import { PlotGrid } from './world/PlotGrid'
 import { TerrainRenderer } from './world/TerrainRenderer'
+import { RoadNetwork } from './world/RoadNetwork'
 import { BuildingRenderer } from './entities/BuildingRenderer'
+import { AgentRenderer, CART, CITIZEN } from './entities/AgentRenderer'
+import { QualityManager, type QualityPreset } from './engine/QualityManager'
 import { SelectionSystem } from './systems/SelectionSystem'
+import { PlacementSystem, type PlacementCandidate } from './systems/PlacementSystem'
 import { installTestBridge, removeTestBridge } from './debug/TestBridge'
-import type { CityDto, PerfSample, RendererBackend, SelectionInfo } from './types'
+import type { BuildingDto, CityDto, PerfSample, RendererBackend, SelectionInfo } from './types'
 
 /**
  * The single seam between Vue and Babylon (ARCHITECTURE.md §7, SCENE_GUIDELINES.md §4).
@@ -34,13 +38,25 @@ export class GameBridge {
   private materials: MaterialLibrary | null = null
   private terrain: TerrainRenderer | null = null
   private buildings: BuildingRenderer | null = null
+  private citizens: AgentRenderer | null = null
+  private carts: AgentRenderer | null = null
+  private quality: QualityManager | null = null
   private selection: SelectionSystem | null = null
+  private placement: PlacementSystem | null = null
   private perf: PerformanceMonitor | null = null
 
   private keyLight: DirectionalLight | null = null
   private fillLight: HemisphericLight | null = null
 
   private elapsed = 0
+  /**
+   * Server time minus device time, measured once at load.
+   *
+   * Everything time-based renders against this rather than the device clock. A player whose
+   * clock is an hour fast must still see exactly the construction the server sees
+   * (REALTIME_AND_TIME_MODEL.md §7).
+   */
+  private serverClockOffsetMs = 0
   private backend: RendererBackend = 'webgl2'
   private started = false
   private resizeObserver: ResizeObserver | null = null
@@ -83,21 +99,41 @@ export class GameBridge {
     this.terrain.build(city.plots)
 
     const models = new ProceduralModelRegistry(scene, this.materials)
+    this.serverClockOffsetMs = Date.parse(city.serverTimeUtc) - Date.now()
+
     this.buildings = new BuildingRenderer(scene, this.materials, models, grid)
+    this.buildings.loadedAtServerMs = Date.parse(city.serverTimeUtc)
     this.buildings.render(city.buildings)
+
+    const roads = new RoadNetwork(city.plots, grid)
+    this.citizens = new AgentRenderer(scene, this.materials, roads, CITIZEN, 'citizen')
+    this.citizens.spawn(20)
+    this.carts = new AgentRenderer(scene, this.materials, roads, CART, 'cart')
+    this.carts.spawn(6)
 
     this.selection = new SelectionSystem(scene, this.materials, this.buildings, grid)
     this.selection.attach()
 
+    this.placement = new PlacementSystem(scene, this.materials, models, grid)
+    this.placement.setWorld(city.plots, city.buildings)
+    this.placement.attach()
+
     this.perf = new PerformanceMonitor(this.engine, scene)
     this.perf.start()
+
+    this.quality = new QualityManager(this.engine, this.perf, this.citizens, this.carts)
+    this.quality.start()
 
     this.applyTimeOfDay(this.timeOfDay)
 
     this.engine.runRenderLoop(() => {
-      const delta = (this.engine?.getDeltaTime() ?? 16) / 1000
+      // Clamped because a backgrounded tab resumes with a huge delta, which would teleport
+      // every agent across the map in a single frame.
+      const delta = Math.min((this.engine?.getDeltaTime() ?? 16) / 1000, 0.1)
       this.elapsed += delta
-      this.buildings?.update(delta, this.elapsed)
+      this.buildings?.update(delta, this.elapsed, this.serverNowMs)
+      this.citizens?.update(delta, this.elapsed)
+      this.carts?.update(delta, this.elapsed)
       this.selection?.update(this.elapsed)
       scene.render()
     })
@@ -174,6 +210,11 @@ export class GameBridge {
 
   // ---- Plain-data surface consumed by Vue ------------------------------------------------
 
+  /** The current server time, derived from the offset measured at load. */
+  get serverNowMs(): number {
+    return Date.now() + this.serverClockOffsetMs
+  }
+
   get rendererBackend(): RendererBackend {
     return this.backend
   }
@@ -210,6 +251,48 @@ export class GameBridge {
     return this.camera?.state ?? null
   }
 
+  get qualityPreset(): QualityPreset {
+    return this.quality?.preset ?? 'medium'
+  }
+
+  setQualityPreset(preset: QualityPreset): void {
+    this.quality?.apply(preset)
+  }
+
+  get agentCounts(): { citizens: number; carts: number } {
+    return { citizens: this.citizens?.count ?? 0, carts: this.carts?.count ?? 0 }
+  }
+
+  // ---- Placement -------------------------------------------------------------------------
+
+  beginPlacement(definitionId: string, onConfirm: (candidate: PlacementCandidate) => void): void {
+    this.placement?.begin(definitionId, onConfirm)
+  }
+
+  cancelPlacement(): void {
+    this.placement?.stop()
+  }
+
+  get isPlacing(): boolean {
+    return this.placement?.isActive ?? false
+  }
+
+  onPlacementCandidateChanged(listener: (candidate: PlacementCandidate | null) => void): () => void {
+    return this.placement?.onCandidateChanged(listener) ?? (() => {})
+  }
+
+  /**
+   * Adds a building the server has just confirmed.
+   *
+   * Called only with the server's own response, never optimistically. The visual appears a
+   * round trip late rather than appearing and then being rewound — for a build that costs
+   * real resources, a ghost that vanishes reads as a bug, not as responsiveness.
+   */
+  addBuilding(dto: BuildingDto): void {
+    this.buildings?.add(dto)
+    this.placement?.markOccupied(dto.col, dto.row)
+  }
+
   focusOnPlot(col: number, row: number, gridSize: number): void {
     const grid = new PlotGrid(gridSize)
     this.camera?.focusOn(grid.toWorld(col, row))
@@ -221,8 +304,12 @@ export class GameBridge {
     this.resizeObserver = null
     if (__TRADEBORN_DEBUG__) removeTestBridge()
 
+    this.quality?.dispose()
     this.perf?.dispose()
+    this.placement?.dispose()
     this.selection?.dispose()
+    this.citizens?.dispose()
+    this.carts?.dispose()
     this.buildings?.dispose()
     this.terrain?.dispose()
     this.camera?.dispose()

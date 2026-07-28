@@ -68,10 +68,14 @@ public sealed class GetCityHandler(
                 b.Row,
                 b.Level,
                 b.State.ToString(),
-                b.HaltReason == HaltReason.None ? null : b.HaltReason.ToString()))
+                b.HaltReason == HaltReason.None ? null : b.HaltReason.ToString(),
+                b.CompletesAtUtc,
+                b.PendingLevel,
+                b.ConstructionProgress(now)))
             .ToArray();
 
-        var plots = aggregate.Plots
+        var plots = city.Plots
+            .OrderBy(p => p.Row).ThenBy(p => p.Col)
             .Select(p => new PlotDto(p.Col, p.Row, p.Terrain, p.Unlocked))
             .ToArray();
 

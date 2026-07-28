@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Tradeborn.Application.Abstractions;
 using Tradeborn.Domain.Buildings;
+using Tradeborn.Domain.Common;
 using Tradeborn.Domain.Economy;
 using Tradeborn.Domain.Production;
 using Tradeborn.Infrastructure.Persistence;
@@ -43,7 +44,10 @@ public sealed class GameCatalog : IGameCatalog
     {
         var resourceRows = await db.ResourceDefinitions.AsNoTracking().ToListAsync(cancellationToken);
         var recipeRows = await db.Recipes.AsNoTracking().Include(r => r.Ingredients).ToListAsync(cancellationToken);
-        var buildingRows = await db.BuildingDefinitions.AsNoTracking().ToListAsync(cancellationToken);
+        var buildingRows = await db.BuildingDefinitions
+            .AsNoTracking()
+            .Include(b => b.Costs)
+            .ToListAsync(cancellationToken);
 
         var resources = resourceRows
             .Select(r => new ResourceDefinition(ResourceId.From(r.Id), r.Tier, r.BasePriceCoins, r.MarketDepth))
@@ -67,7 +71,16 @@ public sealed class GameCatalog : IGameCatalog
             .Select(b => new BuildingDefinition(
                 b.Id,
                 b.RecipeId is null ? null : recipes[b.RecipeId],
-                b.StoragePerResource))
+                b.StoragePerResource,
+                Money.FromCoins(b.BuildCostCoins),
+                b.Costs
+                    .OrderBy(c => c.ResourceId, StringComparer.Ordinal)
+                    .Select(c => ResourceAmount.Of(c.ResourceId, c.Quantity))
+                    .ToArray(),
+                b.BuildSeconds * 1000,
+                b.UnlockCityLevel,
+                b.PrePlaced,
+                b.IsCityCentre))
             .ToArray();
 
         return new GameCatalog(resources, buildings);

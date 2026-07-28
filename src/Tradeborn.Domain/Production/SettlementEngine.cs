@@ -12,7 +12,7 @@ namespace Tradeborn.Domain.Production;
 /// Nothing advances until someone looks. Calling <see cref="Settle"/> brings a city from
 /// <see cref="City.LastSettledAt"/> up to a given instant, respecting the three limits that
 /// a naive <c>elapsed × rate</c> calculation ignores: available time, available inputs, and
-/// free storage.
+/// free storage. It also completes any build or upgrade whose deadline has passed.
 /// </para>
 /// <para><b>Why a fixed grid.</b> Sub-steps are aligned to an absolute time grid
 /// (multiples of <see cref="StepMilliseconds"/> since the Unix epoch) rather than being
@@ -25,10 +25,9 @@ namespace Tradeborn.Domain.Production;
 /// added to the inventory only at the end. Without this a consumer could use, in the very
 /// same step, goods its upstream producer had not yet made — a small but real way for the
 /// economy to create value from nothing.</para>
-/// <para><b>Why it is fast.</b> Once every producing building is halted and a full step
-/// yields nothing, the state is a fixed point: no further step can change anything until
-/// the player acts. Settlement stops there. A player away for a month typically costs only
-/// the steps needed to fill their warehouse.</para>
+/// <para><b>Why it is fast.</b> Once every producing building is halted, no construction is
+/// pending, and a full step yields nothing, the state is a fixed point: no further step can
+/// change anything until the player acts. Settlement stops there.</para>
 /// </remarks>
 public static class SettlementEngine
 {
@@ -60,9 +59,10 @@ public static class SettlementEngine
         }
 
         var produced = new Dictionary<ResourceId, long>();
-        var active = city.Buildings
+        var completed = new List<string>();
+
+        var producers = city.Buildings
             .Where(b => b.Definition.Recipe is not null)
-            .Where(b => b.State is BuildingState.Producing or BuildingState.Halted)
             .OrderBy(b => b.Definition.Recipe!.TopologicalRank)
             .ThenBy(b => b.Id, StringComparer.Ordinal)
             .ToArray();
@@ -78,15 +78,17 @@ public static class SettlementEngine
                 stepEnd = now;
             }
 
+            // Completions run first so a building that finishes at this boundary produces for
+            // the rest of the step rather than idling until the next one.
+            var anyCompleted = CompleteFinishedWork(city, stepEnd, completed);
+
             var deltaMs = (long)(stepEnd - cursor).TotalMilliseconds;
-            var somethingHappened = AdvanceStep(city, active, deltaMs, produced);
+            var anyProduction = AdvanceStep(city, producers, deltaMs, produced);
 
             cursor = stepEnd;
             steps++;
 
-            // Fixed point: nothing produced and every building is blocked. Since inventory
-            // only changes through production, no later step can differ from this one.
-            if (!somethingHappened && active.All(b => b.HaltReason != HaltReason.None))
+            if (IsFixedPoint(city, producers, anyProduction, anyCompleted, now))
             {
                 break;
             }
@@ -94,7 +96,67 @@ public static class SettlementEngine
 
         city.LastSettledAt = now;
 
-        return new SettlementResult(now, steps, produced);
+        return new SettlementResult(now, steps, produced, completed);
+    }
+
+    /// <summary>
+    /// Completes builds and upgrades whose deadline has passed.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a scheduled job. Completion is a purely time-driven state transition,
+    /// so settlement already has everything it needs — which means a construction finishes
+    /// correctly whether or not a background worker is running (ADR-008). Completions land on
+    /// the 30 s grid, so a build may finish up to one step after its exact deadline.
+    /// </remarks>
+    private static bool CompleteFinishedWork(City city, DateTimeOffset at, List<string> completed)
+    {
+        var any = false;
+
+        foreach (var building in city.Buildings)
+        {
+            if (building.TryComplete(at))
+            {
+                completed.Add(building.Id);
+                any = true;
+            }
+        }
+
+        if (any)
+        {
+            // A finished warehouse adds storage; capacity is derived, so it must be recomputed
+            // before the production pass decides whether anything is full.
+            city.RecomputeCapacity();
+        }
+
+        return any;
+    }
+
+    /// <summary>
+    /// True when no further step could change anything.
+    /// </summary>
+    /// <remarks>
+    /// Pending construction is part of the test. Without it, a city whose buildings are all
+    /// halted would exit early and skip past a build that was due to complete — the build
+    /// would land on the next read instead of this one.
+    /// </remarks>
+    private static bool IsFixedPoint(
+        City city,
+        IReadOnlyList<BuildingInstance> producers,
+        bool anyProduction,
+        bool anyCompleted,
+        DateTimeOffset now)
+    {
+        if (anyProduction || anyCompleted)
+        {
+            return false;
+        }
+
+        if (city.Buildings.Any(b => b.IsUnderConstruction && b.CompletesAtUtc <= now))
+        {
+            return false;
+        }
+
+        return producers.All(b => b.IsUnderConstruction || b.HaltReason != HaltReason.None);
     }
 
     private static DateTimeOffset NextGridBoundary(DateTimeOffset from)
@@ -106,7 +168,7 @@ public static class SettlementEngine
 
     private static bool AdvanceStep(
         City city,
-        IReadOnlyList<BuildingInstance> active,
+        IReadOnlyList<BuildingInstance> producers,
         long deltaMs,
         Dictionary<ResourceId, long> producedTotals)
     {
@@ -114,8 +176,14 @@ public static class SettlementEngine
         var pending = new Dictionary<ResourceId, long>();
         var anyProduction = false;
 
-        foreach (var building in active)
+        foreach (var building in producers)
         {
+            // A half-built factory produces nothing.
+            if (building.IsUnderConstruction)
+            {
+                continue;
+            }
+
             var recipe = building.Definition.Recipe!;
             building.ProgressMilliseconds += deltaMs;
 
@@ -187,10 +255,11 @@ public static class SettlementEngine
 public sealed record SettlementResult(
     DateTimeOffset SettledAt,
     int StepsRun,
-    IReadOnlyDictionary<ResourceId, long> Produced)
+    IReadOnlyDictionary<ResourceId, long> Produced,
+    IReadOnlyList<string> CompletedBuildings)
 {
     public static SettlementResult Empty(DateTimeOffset at) =>
-        new(at, 0, new Dictionary<ResourceId, long>());
+        new(at, 0, new Dictionary<ResourceId, long>(), []);
 
     public bool ProducedAnything => Produced.Count > 0;
 }

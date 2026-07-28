@@ -1,7 +1,11 @@
 using Tradeborn.Domain.Buildings;
 using Tradeborn.Domain.Common;
+using Tradeborn.Domain.Production;
 
 namespace Tradeborn.Domain.Cities;
+
+/// <summary>A single build plot and whether the player has unlocked it yet.</summary>
+public sealed record CityPlot(int Col, int Row, string Terrain, bool Unlocked);
 
 /// <summary>
 /// A player's city — the aggregate root and the transactional boundary for every economic
@@ -10,6 +14,7 @@ namespace Tradeborn.Domain.Cities;
 public sealed class City
 {
     private readonly List<BuildingInstance> buildings = [];
+    private readonly Dictionary<(int Col, int Row), CityPlot> plots = [];
 
     public City(string id, DateTimeOffset createdAt)
     {
@@ -26,15 +31,36 @@ public sealed class City
 
     public IReadOnlyList<BuildingInstance> Buildings => buildings;
 
+    public IReadOnlyCollection<CityPlot> Plots => plots.Values;
+
     /// <summary>
     /// The instant this city's state is accurate as of. Everything in Tradeborn is derived
     /// from this plus the server clock — see docs/architecture/REALTIME_AND_TIME_MODEL.md.
     /// </summary>
     public DateTimeOffset LastSettledAt { get; internal set; }
 
+    // ---- Plots -----------------------------------------------------------------------------
+
+    public void SetPlots(IEnumerable<CityPlot> layout)
+    {
+        plots.Clear();
+        foreach (var plot in layout)
+        {
+            plots[(plot.Col, plot.Row)] = plot;
+        }
+    }
+
+    public CityPlot? PlotAt(int col, int row) =>
+        plots.TryGetValue((col, row), out var plot) ? plot : null;
+
+    public bool IsOccupied(int col, int row) =>
+        buildings.Any(b => b.Col == col && b.Row == row);
+
+    // ---- Buildings -------------------------------------------------------------------------
+
     public void Add(BuildingInstance building)
     {
-        if (buildings.Any(b => b.Col == building.Col && b.Row == building.Row))
+        if (IsOccupied(building.Col, building.Row))
         {
             throw new InvalidOperationException($"Plot ({building.Col},{building.Row}) is occupied.");
         }
@@ -43,9 +69,71 @@ public sealed class City
         RecomputeCapacity();
     }
 
+    public BuildingInstance? BuildingById(string id) =>
+        buildings.FirstOrDefault(b => string.Equals(b.Id, id, StringComparison.Ordinal));
+
+    /// <summary>Builds and upgrades currently in flight. Bounded by <see cref="ConstructionSlots"/>.</summary>
+    public int ActiveConstructions => buildings.Count(b => b.IsUnderConstruction);
+
+    /// <summary>
+    /// How many builds may run at once.
+    /// </summary>
+    /// <remarks>
+    /// One slot in the vertical slice, a second from city level 3. The queue is a pacing
+    /// device, not a monetisation hook: extra slots are earned by progression and are never
+    /// sold (docs/vision/GAME_VISION.md §8).
+    /// </remarks>
+    public int ConstructionSlots => Level >= 3 ? 2 : 1;
+
+    /// <summary>
+    /// City level, from docs/economy/ECONOMY_DESIGN.md §9.
+    /// </summary>
+    /// <remarks>
+    /// The city-centre cap stops a player unlocking high tiers by spamming cheap buildings:
+    /// breadth alone does not advance the city, the centre has to keep up.
+    /// </remarks>
+    public int Level
+    {
+        get
+        {
+            var totalLevels = buildings.Where(b => !b.IsUnderConstruction).Sum(b => b.Level);
+            var centre = buildings.FirstOrDefault(b => b.Definition.IsCityCentre);
+            var cap = (centre?.Level ?? 1) * 2;
+            return Math.Clamp(totalLevels / 4, 1, cap);
+        }
+    }
+
+    // ---- Money and materials ---------------------------------------------------------------
+
     public void Credit(Money amount) => Balance += amount;
 
     public void Debit(Money amount) => Balance = Balance.Debit(amount);
+
+    public bool CanAfford(BuildCost cost) =>
+        Balance.CanAfford(cost.Coins) &&
+        cost.Resources.All(r => Inventory.Get(r.Resource) >= r.Quantity);
+
+    /// <summary>
+    /// Deducts a cost in full, or throws without changing anything.
+    /// </summary>
+    /// <remarks>
+    /// Affordability is checked for <b>every</b> component before anything is deducted. A
+    /// partial deduction — coins taken, materials short — would leave the player poorer with
+    /// nothing to show for it, which is the worst possible failure mode in an economy game.
+    /// </remarks>
+    public void Spend(BuildCost cost)
+    {
+        if (!CanAfford(cost))
+        {
+            throw new InvalidOperationException("Cannot afford this cost.");
+        }
+
+        Balance = Balance.Debit(cost.Coins);
+        foreach (var resource in cost.Resources)
+        {
+            Inventory.Remove(resource.Resource, resource.Quantity);
+        }
+    }
 
     /// <summary>
     /// Capacity is derived from buildings, never stored independently, so it can never drift
